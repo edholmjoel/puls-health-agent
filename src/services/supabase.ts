@@ -1,0 +1,338 @@
+import '../config';
+import { createClient, SupabaseClient } from '@supabase/supabase-js';
+import {
+  Database,
+  DbUser,
+  DbUserInsert,
+  DbUserUpdate,
+  DbConversationState,
+  DbConversationStateInsert,
+  DbConversationStateUpdate,
+  DbWearableDataInsert,
+  DbWearableData,
+  DbDailyBriefInsert,
+  DbDailyBrief,
+} from '../types/database';
+import { ExternalServiceError } from '../errors/AppError';
+import logger from '../utils/logger';
+
+class SupabaseService {
+  private client: SupabaseClient<Database>;
+
+  constructor() {
+    const supabaseUrl = process.env.SUPABASE_URL;
+    const supabaseKey = process.env.SUPABASE_SERVICE_KEY;
+
+    if (!supabaseUrl || !supabaseKey) {
+      throw new Error('Missing Supabase credentials in environment variables');
+    }
+
+    this.client = createClient<Database>(supabaseUrl, supabaseKey);
+    logger.info('Supabase client initialized');
+  }
+
+  // User operations
+  async getUserByPhone(phoneNumber: string): Promise<DbUser | null> {
+    try {
+      const { data, error } = await this.client
+        .from('users')
+        .select('*')
+        .eq('phone_number', phoneNumber)
+        .single();
+
+      if (error && error.code !== 'PGRST116') {
+        throw new ExternalServiceError('Supabase', error.message);
+      }
+
+      return data;
+    } catch (error) {
+      if (error instanceof ExternalServiceError) throw error;
+      logger.error('Error fetching user by phone', { phoneNumber, error });
+      throw new ExternalServiceError('Supabase', 'Failed to fetch user');
+    }
+  }
+
+  async getUserByJunctionId(junctionUserId: string): Promise<DbUser | null> {
+    try {
+      const { data, error } = await this.client
+        .from('users')
+        .select('*')
+        .eq('junction_user_id', junctionUserId)
+        .single();
+
+      if (error && error.code !== 'PGRST116') {
+        throw new ExternalServiceError('Supabase', error.message);
+      }
+
+      return data;
+    } catch (error) {
+      if (error instanceof ExternalServiceError) throw error;
+      logger.error('Error fetching user by Junction ID', { junctionUserId, error });
+      throw new ExternalServiceError('Supabase', 'Failed to fetch user');
+    }
+  }
+
+  async createUser(userData: DbUserInsert): Promise<DbUser> {
+    try {
+      const { data, error } = await this.client
+        .from('users')
+        .insert(userData as any)
+        .select()
+        .single();
+
+      if (error) {
+        throw new ExternalServiceError('Supabase', error.message);
+      }
+
+      logger.info('User created', { userId: (data as DbUser).id, phoneNumber: userData.phone_number });
+      return data as DbUser;
+    } catch (error) {
+      if (error instanceof ExternalServiceError) throw error;
+      logger.error('Error creating user', { userData, error });
+      throw new ExternalServiceError('Supabase', 'Failed to create user');
+    }
+  }
+
+  async updateUser(userId: string, updates: DbUserUpdate): Promise<DbUser> {
+    try {
+      const { data, error } = await (this.client
+        .from('users') as any)
+        .update({ ...updates, updated_at: new Date().toISOString() })
+        .eq('id', userId)
+        .select()
+        .single();
+
+      if (error) {
+        logger.error('Supabase user update error', {
+          error,
+          code: error.code,
+          message: error.message,
+          details: error.details,
+          hint: error.hint,
+          userId,
+          updates
+        });
+        throw new ExternalServiceError('Supabase', error.message);
+      }
+
+      logger.info('User updated', { userId, updates });
+      return data as DbUser;
+    } catch (error) {
+      if (error instanceof ExternalServiceError) throw error;
+      logger.error('Error updating user', { userId, updates, error });
+      throw new ExternalServiceError('Supabase', 'Failed to update user');
+    }
+  }
+
+  async getActiveUsers(): Promise<DbUser[]> {
+    try {
+      const { data, error } = await this.client
+        .from('users')
+        .select('*')
+        .eq('onboarding_complete', true);
+
+      if (error) {
+        throw new ExternalServiceError('Supabase', error.message);
+      }
+
+      return data || [];
+    } catch (error) {
+      if (error instanceof ExternalServiceError) throw error;
+      logger.error('Error fetching active users', { error });
+      throw new ExternalServiceError('Supabase', 'Failed to fetch active users');
+    }
+  }
+
+  // Conversation state operations
+  async getConversationState(userId: string): Promise<DbConversationState | null> {
+    try {
+      const { data, error } = await this.client
+        .from('conversation_state')
+        .select('*')
+        .eq('user_id', userId)
+        .single();
+
+      if (error && error.code !== 'PGRST116') {
+        logger.error('Supabase conversation_state fetch error', {
+          error,
+          code: error.code,
+          message: error.message,
+          details: error.details,
+          hint: error.hint,
+          userId
+        });
+        throw new ExternalServiceError('Supabase', error.message);
+      }
+
+      return data;
+    } catch (error) {
+      if (error instanceof ExternalServiceError) throw error;
+      logger.error('Error fetching conversation state', { userId, error });
+      throw new ExternalServiceError('Supabase', 'Failed to fetch conversation state');
+    }
+  }
+
+  async createConversationState(stateData: DbConversationStateInsert): Promise<DbConversationState> {
+    try {
+      const { data, error } = await this.client
+        .from('conversation_state')
+        .insert(stateData as any)
+        .select()
+        .single();
+
+      if (error) {
+        logger.error('Supabase conversation_state insert error', {
+          error,
+          code: error.code,
+          message: error.message,
+          details: error.details,
+          hint: error.hint
+        });
+        throw new ExternalServiceError('Supabase', error.message);
+      }
+
+      logger.info('Conversation state created', { userId: stateData.user_id, state: stateData.state });
+      return data;
+    } catch (error) {
+      if (error instanceof ExternalServiceError) throw error;
+      logger.error('Error creating conversation state', { stateData, error });
+      throw new ExternalServiceError('Supabase', 'Failed to create conversation state');
+    }
+  }
+
+  async updateConversationState(
+    userId: string,
+    updates: DbConversationStateUpdate
+  ): Promise<DbConversationState> {
+    try {
+      const { data, error } = await (this.client
+        .from('conversation_state') as any)
+        .update({ ...updates, updated_at: new Date().toISOString() })
+        .eq('user_id', userId)
+        .select()
+        .single();
+
+      if (error) {
+        throw new ExternalServiceError('Supabase', error.message);
+      }
+
+      logger.info('Conversation state updated', { userId, updates });
+      return data as DbConversationState;
+    } catch (error) {
+      if (error instanceof ExternalServiceError) throw error;
+      logger.error('Error updating conversation state', { userId, updates, error });
+      throw new ExternalServiceError('Supabase', 'Failed to update conversation state');
+    }
+  }
+
+  // Wearable data operations
+  async storeWearableData(dataInsert: DbWearableDataInsert): Promise<DbWearableData> {
+    try {
+      const { data, error } = await this.client
+        .from('wearable_data')
+        .insert(dataInsert as any)
+        .select()
+        .single();
+
+      if (error) {
+        if (error.code === '23505') {
+          logger.warn('Duplicate wearable data event ignored', {
+            sourceEventId: dataInsert.source_event_id
+          });
+          throw error;
+        }
+        throw new ExternalServiceError('Supabase', error.message);
+      }
+
+      logger.info('Wearable data stored', {
+        userId: dataInsert.user_id,
+        dataType: dataInsert.data_type,
+        sourceEventId: dataInsert.source_event_id,
+      });
+      return data;
+    } catch (error: any) {
+      if (error?.code === '23505') {
+        throw error;
+      }
+      if (error instanceof ExternalServiceError) throw error;
+      logger.error('Error storing wearable data', { dataInsert, error });
+      throw new ExternalServiceError('Supabase', 'Failed to store wearable data');
+    }
+  }
+
+  async getWearableDataForUser(
+    userId: string,
+    startDate: string,
+    endDate?: string
+  ): Promise<DbWearableData[]> {
+    try {
+      let query = this.client
+        .from('wearable_data')
+        .select('*')
+        .eq('user_id', userId)
+        .gte('received_at', startDate)
+        .order('received_at', { ascending: false });
+
+      if (endDate) {
+        query = query.lte('received_at', endDate);
+      }
+
+      const { data, error } = await query;
+
+      if (error) {
+        throw new ExternalServiceError('Supabase', error.message);
+      }
+
+      return data || [];
+    } catch (error) {
+      if (error instanceof ExternalServiceError) throw error;
+      logger.error('Error fetching wearable data', { userId, startDate, endDate, error });
+      throw new ExternalServiceError('Supabase', 'Failed to fetch wearable data');
+    }
+  }
+
+  // Daily briefs operations
+  async storeDailyBrief(briefData: DbDailyBriefInsert): Promise<DbDailyBrief> {
+    try {
+      const { data, error } = await this.client
+        .from('daily_briefs')
+        .insert(briefData as any)
+        .select()
+        .single();
+
+      if (error) {
+        throw new ExternalServiceError('Supabase', error.message);
+      }
+
+      logger.info('Daily brief stored', { userId: briefData.user_id, date: briefData.date });
+      return data;
+    } catch (error) {
+      if (error instanceof ExternalServiceError) throw error;
+      logger.error('Error storing daily brief', { briefData, error });
+      throw new ExternalServiceError('Supabase', 'Failed to store daily brief');
+    }
+  }
+
+  async getBriefForDate(userId: string, date: string): Promise<DbDailyBrief | null> {
+    try {
+      const { data, error } = await this.client
+        .from('daily_briefs')
+        .select('*')
+        .eq('user_id', userId)
+        .eq('date', date)
+        .single();
+
+      if (error && error.code !== 'PGRST116') {
+        throw new ExternalServiceError('Supabase', error.message);
+      }
+
+      return data;
+    } catch (error) {
+      if (error instanceof ExternalServiceError) throw error;
+      logger.error('Error fetching daily brief', { userId, date, error });
+      throw new ExternalServiceError('Supabase', 'Failed to fetch daily brief');
+    }
+  }
+}
+
+export default new SupabaseService();
