@@ -226,28 +226,46 @@ class SupabaseService {
   }
 
   // Wearable data operations
-  async storeWearableData(dataInsert: DbWearableDataInsert): Promise<DbWearableData> {
+  async storeWearableData(dataToStore: {
+    user_id: string;
+    junction_user_id: string;
+    event_type: string;
+    provider?: string;
+    payload: any;
+  }): Promise<any> {
     try {
       const { data, error } = await this.client
         .from('wearable_data')
-        .insert(dataInsert as any)
+        .insert({
+          user_id: dataToStore.user_id,
+          junction_user_id: dataToStore.junction_user_id,
+          event_type: dataToStore.event_type,
+          provider: dataToStore.provider || null,
+          payload: dataToStore.payload,
+          received_at: new Date().toISOString(),
+        } as any)
         .select()
         .single();
 
       if (error) {
         if (error.code === '23505') {
           logger.warn('Duplicate wearable data event ignored', {
-            sourceEventId: dataInsert.source_event_id
+            eventType: dataToStore.event_type
           });
           throw error;
         }
+        logger.error('Supabase wearable_data insert error', {
+          error,
+          code: error.code,
+          message: error.message,
+          details: error.details
+        });
         throw new ExternalServiceError('Supabase', error.message);
       }
 
       logger.info('Wearable data stored', {
-        userId: dataInsert.user_id,
-        dataType: dataInsert.data_type,
-        sourceEventId: dataInsert.source_event_id,
+        userId: dataToStore.user_id,
+        eventType: dataToStore.event_type,
       });
       return data;
     } catch (error: any) {
@@ -255,7 +273,7 @@ class SupabaseService {
         throw error;
       }
       if (error instanceof ExternalServiceError) throw error;
-      logger.error('Error storing wearable data', { dataInsert, error });
+      logger.error('Error storing wearable data', { dataToStore, error });
       throw new ExternalServiceError('Supabase', 'Failed to store wearable data');
     }
   }
@@ -266,20 +284,36 @@ class SupabaseService {
     endDate?: string
   ): Promise<DbWearableData[]> {
     try {
+      // Ensure dates include time for proper timestamp comparison
+      const startTimestamp = startDate.includes('T') ? startDate : `${startDate}T00:00:00Z`;
+      const endTimestamp = endDate
+        ? (endDate.includes('T') ? endDate : `${endDate}T23:59:59Z`)
+        : undefined;
+
       let query = this.client
         .from('wearable_data')
         .select('*')
         .eq('user_id', userId)
-        .gte('received_at', startDate)
+        .gte('received_at', startTimestamp)
         .order('received_at', { ascending: false });
 
-      if (endDate) {
-        query = query.lte('received_at', endDate);
+      if (endTimestamp) {
+        query = query.lte('received_at', endTimestamp);
       }
 
       const { data, error } = await query;
 
       if (error) {
+        logger.error('Supabase wearable_data fetch error', {
+          error,
+          code: error.code,
+          message: error.message,
+          details: error.details,
+          hint: error.hint,
+          userId,
+          startDate,
+          endDate
+        });
         throw new ExternalServiceError('Supabase', error.message);
       }
 

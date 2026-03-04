@@ -272,22 +272,44 @@ async function handleActiveConversation(
     return;
   }
 
-  const wearableData = await supabaseService.getWearableDataForUser(user.id, startDate, endDate);
+  let wearableData = [];
+  try {
+    wearableData = await supabaseService.getWearableDataForUser(user.id, startDate, endDate);
+    logger.info('Fetched wearable data', {
+      requestId,
+      userId: user.id,
+      recordCount: wearableData.length,
+      dateRange: { startDate, endDate }
+    });
+  } catch (error: any) {
+    logger.warn('Could not fetch wearable data, proceeding without it', {
+      requestId,
+      userId: user.id,
+      error: error.message
+    });
+  }
 
   const healthData: UserHealthData = {
     sleep: wearableData
-      .filter((d) => d.data_type === 'sleep')
-      .map((d) => d.data as any)
+      .filter((d) => d.event_type && d.event_type.includes('sleep'))
+      .map((d) => d.payload as any)
       .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()),
     activity: wearableData
-      .filter((d) => d.data_type === 'activity')
-      .map((d) => d.data as any)
+      .filter((d) => d.event_type && d.event_type.includes('activity'))
+      .map((d) => d.payload as any)
       .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()),
     workouts: wearableData
-      .filter((d) => d.data_type === 'workout')
-      .map((d) => d.data as any)
+      .filter((d) => d.event_type && d.event_type.includes('workout'))
+      .map((d) => d.payload as any)
       .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()),
   };
+
+  logger.info('Prepared health data for AI', {
+    requestId,
+    sleepCount: healthData.sleep?.length || 0,
+    activityCount: healthData.activity?.length || 0,
+    workoutsCount: healthData.workouts?.length || 0
+  });
 
   let response: string;
 

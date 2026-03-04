@@ -52,7 +52,10 @@ class JunctionService {
       logger.debug('Junction API request', { method, endpoint, body });
 
       const response = await fetch(url, options);
-      const responseData = await response.json() as any;
+
+      // Handle empty responses (e.g., 202 Accepted)
+      const responseText = await response.text();
+      const responseData = responseText ? JSON.parse(responseText) : {};
 
       if (!response.ok) {
         logger.error('Junction API error', {
@@ -120,6 +123,18 @@ class JunctionService {
       end_date: endDate,
     });
     return this.makeRequest(`/v2/summary/body/${userId}?${params}`);
+  }
+
+  async refreshUserData(userId: string): Promise<any> {
+    return this.makeRequest(`/v2/user/refresh/${userId}`, 'POST');
+  }
+
+  async triggerHistoricalPull(userIds: string[], provider: string): Promise<any> {
+    return this.makeRequest('/v2/link/bulk_trigger_historical_pull', 'POST', {
+      user_ids: userIds,
+      provider: provider,
+      wait_for_completion: false,
+    });
   }
 
   verifyWebhook(payload: string, headers: Record<string, string>): JunctionWebhookEvent {

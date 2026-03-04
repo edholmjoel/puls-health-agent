@@ -41,6 +41,7 @@ router.post(
         eventType: event.event_type,
         userId: event.user_id,
         clientUserId: event.client_user_id,
+        eventData: JSON.stringify(event.data || {}).substring(0, 500),
       });
 
       await handleJunctionEvent(event, requestId);
@@ -61,33 +62,120 @@ router.post(
 async function handleJunctionEvent(event: JunctionWebhookEvent, requestId: string): Promise<void> {
   const { event_type, user_id } = event;
 
+  // Handle connection events separately
   if (event_type === 'provider.connection.created') {
     await handleConnectionCreated(event as ConnectionCreatedEvent, requestId);
-  } else if (
-    event_type.includes('sleep') &&
-    (event_type.includes('daily.data') || event_type.includes('historical.data'))
-  ) {
-    await handleSleepData(event as SleepDataEvent, requestId);
-  } else if (
-    event_type.includes('activity') &&
-    (event_type.includes('daily.data') || event_type.includes('historical.data'))
-  ) {
-    await handleActivityData(event as ActivityDataEvent, requestId);
-  } else if (
-    event_type.includes('workouts') &&
-    (event_type.includes('daily.data') || event_type.includes('historical.data'))
-  ) {
-    await handleWorkoutData(event as WorkoutDataEvent, requestId);
-  } else if (
-    event_type.includes('body') &&
-    (event_type.includes('daily.data') || event_type.includes('historical.data'))
-  ) {
-    await handleBodyData(event as BodyDataEvent, requestId);
-  } else {
-    logger.info('Unhandled Junction event type', {
+    return;
+  }
+
+  // Handle all data events generically (daily.data.* or historical.data.*)
+  if (event_type.includes('daily.data') || event_type.includes('historical.data')) {
+    await handleGenericDataEvent(event, requestId);
+    return;
+  }
+
+  // Log truly unhandled events (not data events)
+  logger.info('Unhandled Junction event type', {
+    requestId,
+    eventType: event_type,
+    userId: user_id,
+  });
+}
+
+async function handleGenericDataEvent(event: JunctionWebhookEvent, requestId: string): Promise<void> {
+  const { user_id, event_type, data } = event;
+
+  const user = await supabaseService.getUserByJunctionId(user_id);
+  if (!user) {
+    logger.warn('User not found for data event', { requestId, userId: user_id, eventType: event_type });
+    return;
+  }
+
+  if (!data || typeof data !== 'object') {
+    logger.debug('No data object in event', { requestId, userId: user_id, eventType: event_type });
+    return;
+  }
+
+  // Extract data type from event_type
+  // e.g., "historical.data.sleep.created" -> "sleep"
+  // e.g., "daily.data.activity.created" -> "activity"
+  const parts = event_type.split('.');
+  const dataTypeIndex = parts.findIndex(p => p === 'data') + 1;
+  const dataType = parts[dataTypeIndex];
+
+  if (!dataType) {
+    logger.warn('Could not extract data type from event', { requestId, eventType: event_type });
+    return;
+  }
+
+  // Look for the data array in the data object
+  // Junction sends data like: { sleep: [...], activity: [...], etc }
+  const dataArray = (data as any)[dataType];
+
+  if (!Array.isArray(dataArray)) {
+    logger.info('No array found for data type', {
       requestId,
       eventType: event_type,
-      userId: user_id,
+      dataType,
+      availableKeys: Object.keys(data)
+    });
+    return;
+  }
+
+  if (dataArray.length === 0) {
+    logger.info('Empty data array for type', { requestId, eventType: event_type, dataType });
+    return;
+  }
+
+  // Store each entry
+  let storedCount = 0;
+  let duplicateCount = 0;
+
+  for (const entry of dataArray) {
+    try {
+      await supabaseService.storeWearableData({
+        user_id: user.id,
+        junction_user_id: user_id,
+        event_type: event_type,
+        payload: entry,
+      });
+      storedCount++;
+
+      logger.info('Wearable data stored', {
+        requestId,
+        userId: user.id,
+        dataType,
+        entryId: entry.id,
+        date: entry.date,
+      });
+    } catch (error: any) {
+      if (error?.code === '23505') {
+        duplicateCount++;
+        logger.debug('Duplicate entry skipped', {
+          requestId,
+          dataType,
+          entryId: entry.id,
+        });
+      } else {
+        logger.error('Failed to store entry', {
+          requestId,
+          dataType,
+          entryId: entry.id,
+          error: error.message,
+        });
+        throw error;
+      }
+    }
+  }
+
+  if (storedCount > 0) {
+    logger.info('Data event processed successfully', {
+      requestId,
+      eventType: event_type,
+      dataType,
+      storedCount,
+      duplicateCount,
+      totalReceived: dataArray.length,
     });
   }
 }
@@ -149,9 +237,9 @@ async function handleSleepData(event: SleepDataEvent, requestId: string): Promis
     try {
       await supabaseService.storeWearableData({
         user_id: user.id,
-        data_type: 'sleep',
-        data: sleepEntry,
-        source_event_id: `${event.event_type}_${user_id}_${sleepEntry.id}`,
+        junction_user_id: user_id,
+        event_type: event.event_type,
+        payload: sleepEntry,
       });
 
       logger.info('Sleep data stored', {
@@ -191,9 +279,9 @@ async function handleActivityData(event: ActivityDataEvent, requestId: string): 
     try {
       await supabaseService.storeWearableData({
         user_id: user.id,
-        data_type: 'activity',
-        data: activityEntry,
-        source_event_id: `${event.event_type}_${user_id}_${activityEntry.id}`,
+        junction_user_id: user_id,
+        event_type: event.event_type,
+        payload: activityEntry,
       });
 
       logger.info('Activity data stored', {
@@ -233,9 +321,9 @@ async function handleWorkoutData(event: WorkoutDataEvent, requestId: string): Pr
     try {
       await supabaseService.storeWearableData({
         user_id: user.id,
-        data_type: 'workout',
-        data: workoutEntry,
-        source_event_id: `${event.event_type}_${user_id}_${workoutEntry.id}`,
+        junction_user_id: user_id,
+        event_type: event.event_type,
+        payload: workoutEntry,
       });
 
       logger.info('Workout data stored', {
@@ -275,9 +363,9 @@ async function handleBodyData(event: BodyDataEvent, requestId: string): Promise<
     try {
       await supabaseService.storeWearableData({
         user_id: user.id,
-        data_type: 'body',
-        data: bodyEntry,
-        source_event_id: `${event.event_type}_${user_id}_${bodyEntry.id}`,
+        junction_user_id: user_id,
+        event_type: event.event_type,
+        payload: bodyEntry,
       });
 
       logger.info('Body data stored', {
