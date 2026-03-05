@@ -323,10 +323,18 @@ Keep it real, keep it short (under 150 words total). Text like you're messaging 
   /**
    * Split response into multiple messages for rapid-fire texting effect
    * Creates 5-10 smaller messages for more natural conversation flow
+   * Can be disabled via ENABLE_MESSAGE_SPLITTING=false to save on message quota
    * @param responseText - The full response from Claude
    * @returns Array of message strings
    */
   splitIntoMessages(responseText: string): string[] {
+    // Check if message splitting is disabled (to save on Twilio quota)
+    const enableSplitting = process.env.ENABLE_MESSAGE_SPLITTING !== 'false';
+
+    if (!enableSplitting) {
+      logger.debug('Message splitting disabled via env var');
+      return [responseText];
+    }
     const messages: string[] = [];
 
     // First, split by double newlines to get paragraphs
