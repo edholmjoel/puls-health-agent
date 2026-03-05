@@ -106,8 +106,20 @@ async function handleGenericDataEvent(event: JunctionWebhookEvent, requestId: st
   }
 
   // Look for the data array in the data object
-  // Junction sends data like: { sleep: [...], activity: [...], etc }
-  const dataArray = (data as any)[dataType];
+  // Junction sends data in two formats:
+  // 1. Aggregated summaries: { activity: [...], sleep: [...], workouts: [...] }
+  // 2. Timeseries data: { data: [...], provider: {...}, source: {...} }
+  let dataArray = (data as any)[dataType];
+
+  // If not found under the data type key, check for generic "data" array (timeseries format)
+  if (!Array.isArray(dataArray) && Array.isArray((data as any).data)) {
+    dataArray = (data as any).data;
+    logger.debug('Using generic data array for timeseries event', {
+      requestId,
+      eventType: event_type,
+      dataType,
+    });
+  }
 
   if (!Array.isArray(dataArray)) {
     logger.info('No array found for data type', {
