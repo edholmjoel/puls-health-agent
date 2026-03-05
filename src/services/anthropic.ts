@@ -322,51 +322,79 @@ Keep it real, keep it short (under 150 words total). Text like you're messaging 
 
   /**
    * Split response into multiple messages for rapid-fire texting effect
-   * Looks for double newlines as natural break points
+   * Creates 5-10 smaller messages for more natural conversation flow
    * @param responseText - The full response from Claude
-   * @returns Array of message strings (1-4 messages)
+   * @returns Array of message strings
    */
   splitIntoMessages(responseText: string): string[] {
-    // First, split by double newlines (paragraph breaks)
+    const messages: string[] = [];
+
+    // First, split by double newlines to get paragraphs
     const paragraphs = responseText.split(/\n\n+/).map(p => p.trim()).filter(p => p.length > 0);
 
-    // If we have 2-4 natural paragraphs, use those
-    if (paragraphs.length >= 2 && paragraphs.length <= 4) {
-      logger.debug('Split response into natural paragraphs', { count: paragraphs.length });
-      return paragraphs;
-    }
+    for (const paragraph of paragraphs) {
+      // Check if this paragraph contains a bullet list
+      const lines = paragraph.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+      const hasBullets = lines.some(l => l.startsWith('•') || l.startsWith('-') || l.startsWith('*'));
 
-    // If just one long paragraph, try to split at sentence boundaries
-    if (paragraphs.length === 1 && paragraphs[0].length > 150) {
-      const text = paragraphs[0];
-      const sentences = text.match(/[^.!?]+[.!?]+/g) || [text];
+      if (hasBullets) {
+        // Split bullet lists: group bullets together but separate from intro text
+        const bulletLines: string[] = [];
+        const nonBulletLines: string[] = [];
 
-      // Group sentences into 2-3 chunks
-      if (sentences.length >= 4) {
-        const mid = Math.ceil(sentences.length / 2);
-        const messages = [
-          sentences.slice(0, mid).join(' ').trim(),
-          sentences.slice(mid).join(' ').trim(),
-        ];
-        logger.debug('Split long paragraph into sentence groups', { count: messages.length });
-        return messages;
+        for (const line of lines) {
+          if (line.startsWith('•') || line.startsWith('-') || line.startsWith('*')) {
+            bulletLines.push(line);
+          } else {
+            nonBulletLines.push(line);
+          }
+        }
+
+        // Add intro text as separate message if it exists
+        if (nonBulletLines.length > 0) {
+          messages.push(nonBulletLines.join('\n'));
+        }
+
+        // Add bullet list as separate message
+        if (bulletLines.length > 0) {
+          messages.push(bulletLines.join('\n'));
+        }
+      } else {
+        // For non-bullet paragraphs, split at sentence boundaries if long
+        if (paragraph.length > 100) {
+          const sentences = paragraph.match(/[^.!?]+[.!?]+/g) || [paragraph];
+
+          // Send each 1-2 sentences as a separate message for rapid-fire feel
+          let currentMessage = '';
+          for (const sentence of sentences) {
+            if (currentMessage.length === 0) {
+              currentMessage = sentence.trim();
+            } else if (currentMessage.length + sentence.length < 150) {
+              // Group max 2 sentences together
+              currentMessage += ' ' + sentence.trim();
+            } else {
+              // Send current message and start new one
+              messages.push(currentMessage);
+              currentMessage = sentence.trim();
+            }
+          }
+
+          if (currentMessage.length > 0) {
+            messages.push(currentMessage);
+          }
+        } else {
+          // Short paragraph - send as is
+          messages.push(paragraph);
+        }
       }
     }
 
-    // If we have more than 4 paragraphs, group them into 2-3 messages
-    if (paragraphs.length > 4) {
-      const mid = Math.ceil(paragraphs.length / 2);
-      const messages = [
-        paragraphs.slice(0, mid).join('\n\n'),
-        paragraphs.slice(mid).join('\n\n'),
-      ];
-      logger.debug('Grouped many paragraphs into 2 messages', { originalCount: paragraphs.length });
-      return messages;
-    }
+    logger.debug('Split response into messages', {
+      originalLength: responseText.length,
+      messageCount: messages.length
+    });
 
-    // Default: return as single message
-    logger.debug('Response kept as single message', { length: responseText.length });
-    return [responseText];
+    return messages.length > 0 ? messages : [responseText];
   }
 }
 
