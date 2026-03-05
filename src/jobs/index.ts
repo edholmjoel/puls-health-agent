@@ -1,6 +1,7 @@
 import { CronJob } from 'cron';
 import { runDailyBrief } from './daily-brief';
 import { scheduledRemindersJob } from './scheduled-reminders';
+import { staleDataCheckJob } from './stale-data-check';
 import logger from '../utils/logger';
 
 export function initializeJobs(): void {
@@ -37,5 +38,14 @@ export function initializeJobs(): void {
     schedule: '0 * * * *',
     timezone: 'Europe/Stockholm',
     nextRun: scheduledRemindersJob.nextDate().toISO(),
+  });
+
+  // Start stale data check job
+  staleDataCheckJob.start();
+
+  logger.info('Stale data check job initialized', {
+    schedule: '0 */6 * * *',
+    timezone: 'Europe/Stockholm',
+    nextRun: staleDataCheckJob.nextDate().toISO(),
   });
 }

@@ -29,7 +29,9 @@ const transports: winston.transport[] = [
   }),
 ];
 
-if (!isDevelopment) {
+// Only add file transports in development
+// Production platforms like Railway use console logs
+if (isDevelopment) {
   transports.push(
     new winston.transports.File({
       filename: path.join('logs', 'error.log'),

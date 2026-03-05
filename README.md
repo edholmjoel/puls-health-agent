@@ -9,6 +9,11 @@ An AI-powered health coaching platform that delivers personalized daily health b
 - **Wearable Integration**: Connects with Garmin, Fitbit, Oura, and other devices via Junction API
 - **Smart Onboarding**: Guided setup process with state machine-driven conversation flow
 - **Data-Driven Insights**: Analyzes sleep, activity, workouts, and vitals to provide actionable recommendations
+- **Proactive Notifications**: Bot initiates conversations when interesting data appears (workouts, HRV drops, poor sleep)
+- **Stale Data Detection**: Automatic alerts when wearable hasn't synced in 24+ hours
+- **Manual Data Refresh**: Users can trigger instant data sync with "refresh" command
+- **Memory Bank**: AI remembers goals, preferences, and context across conversations
+- **Scheduled Reminders**: Set reminders that trigger at specific times
 
 ## Tech Stack
 
@@ -81,9 +86,12 @@ puls-health-agent/
 │   │   ├── supabase.ts
 │   │   ├── junction.ts
 │   │   ├── twilio.ts
-│   │   └── anthropic.ts
+│   │   ├── anthropic.ts
+│   │   └── notifications.ts
 │   ├── jobs/                # Scheduled tasks
 │   │   ├── daily-brief.ts
+│   │   ├── scheduled-reminders.ts
+│   │   ├── stale-data-check.ts
 │   │   └── index.ts
 │   ├── middleware/          # Express middleware
 │   │   ├── errorHandler.ts
@@ -98,7 +106,11 @@ puls-health-agent/
 │   ├── utils/               # Utilities
 │   │   └── logger.ts
 │   └── index.ts             # Application entry point
+├── docs/                   # Documentation
+│   ├── RAILWAY_DEPLOYMENT.md
+│   └── BETA_USER_GUIDE.md
 ├── .env.example
+├── .railwayignore
 ├── package.json
 ├── tsconfig.json
 └── README.md
@@ -396,6 +408,11 @@ WHERE id = '<user-id>';
 
 Implement exponential backoff if rate limits are hit.
 
+## Documentation
+
+- **[Railway Deployment Guide](docs/RAILWAY_DEPLOYMENT.md)** - Step-by-step production deployment
+- **[Beta User Guide](docs/BETA_USER_GUIDE.md)** - Instructions for beta testers
+
 ## Future Enhancements
 
 - [ ] Multi-timezone support (per-user timezone)
@@ -406,6 +423,7 @@ Implement exponential backoff if rate limits are hit.
 - [ ] Advanced analytics dashboard
 - [ ] Multi-language support
 - [ ] Voice note responses via WhatsApp
+- [ ] Junction production API migration
 
 ## License
 

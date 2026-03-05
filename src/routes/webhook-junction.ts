@@ -3,6 +3,7 @@ import express from 'express';
 import junctionService from '../services/junction';
 import supabaseService from '../services/supabase';
 import twilioService from '../services/twilio';
+import notificationService from '../services/notifications';
 import {
   JunctionWebhookEvent,
   ConnectionCreatedEvent,
@@ -173,6 +174,78 @@ async function handleGenericDataEvent(event: JunctionWebhookEvent, requestId: st
       duplicateCount,
       totalReceived: dataArray.length,
     });
+
+    // Analyze for proactive notifications (only for new data, not duplicates)
+    if (storedCount > 0) {
+      await analyzeForProactiveNotification(user, event_type, dataArray, requestId);
+    }
+  }
+}
+
+async function analyzeForProactiveNotification(
+  user: any,
+  eventType: string,
+  dataArray: any[],
+  requestId: string
+): Promise<void> {
+  try {
+    // Only analyze daily data events (not historical bulk imports)
+    if (!eventType.includes('daily.data')) {
+      return;
+    }
+
+    // Analyze each new entry
+    for (const entry of dataArray) {
+      // Check for workouts
+      if (eventType.includes('workout')) {
+        const analysis = await notificationService.analyzeWorkout(user, entry);
+        if (analysis.shouldNotify && analysis.message) {
+          await notificationService.sendProactiveNotification(
+            user,
+            analysis.message,
+            'workout'
+          );
+          logger.info('Proactive workout notification sent', {
+            requestId,
+            userId: user.id,
+            workoutType: entry.sport,
+          });
+          // Only send one notification per webhook event
+          break;
+        }
+      }
+
+      // Check for significant data changes (sleep, activity)
+      if (eventType.includes('sleep') || eventType.includes('activity')) {
+        const analysis = await notificationService.analyzeDataForAlerts(
+          user,
+          eventType,
+          entry
+        );
+        if (analysis.shouldNotify && analysis.message) {
+          await notificationService.sendProactiveNotification(
+            user,
+            analysis.message,
+            'data_alert'
+          );
+          logger.info('Proactive data alert sent', {
+            requestId,
+            userId: user.id,
+            alertType: eventType,
+          });
+          // Only send one notification per webhook event
+          break;
+        }
+      }
+    }
+  } catch (error: any) {
+    logger.error('Error in proactive notification analysis', {
+      requestId,
+      userId: user.id,
+      eventType,
+      error: error.message,
+    });
+    // Don't throw - proactive notifications are non-critical
   }
 }
 

@@ -14,7 +14,9 @@ class JunctionService {
   private webhookSecret: string;
 
   constructor() {
-    this.baseURL = 'https://api.sandbox.eu.junction.com';
+    // Allow configurable API URL for production migration
+    // Default to sandbox, but can be overridden with JUNCTION_API_URL env var
+    this.baseURL = process.env.JUNCTION_API_URL || 'https://api.sandbox.eu.junction.com';
     this.apiKey = process.env.JUNCTION_API_KEY || '';
     this.webhookSecret = process.env.JUNCTION_WEBHOOK_SECRET || '';
 

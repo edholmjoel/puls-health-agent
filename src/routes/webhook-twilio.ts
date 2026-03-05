@@ -262,6 +262,52 @@ async function handleActiveConversation(
 ): Promise<void> {
   const lowerMessage = message.toLowerCase().trim();
 
+  // Handle manual data refresh command
+  if (lowerMessage.includes('refresh') || lowerMessage.includes('sync')) {
+    if (!user.junction_user_id) {
+      await twilioService.sendMessage(
+        phoneNumber,
+        "Hmm, I don't have your wearable connected yet. Can't refresh data without it!"
+      );
+      return;
+    }
+
+    try {
+      logger.info('Manual data refresh requested', {
+        requestId,
+        userId: user.id,
+        junctionUserId: user.junction_user_id,
+      });
+
+      await junctionService.refreshUserData(user.junction_user_id);
+
+      await twilioService.sendMessage(
+        phoneNumber,
+        "Pulling your latest data from the wearable... give me 30 seconds and it'll be updated! 🔄"
+      );
+
+      logger.info('Data refresh triggered successfully', {
+        requestId,
+        userId: user.id,
+      });
+
+      return;
+    } catch (error: any) {
+      logger.error('Failed to trigger data refresh', {
+        requestId,
+        userId: user.id,
+        error: error.message,
+      });
+
+      await twilioService.sendMessage(
+        phoneNumber,
+        "Couldn't refresh your data right now. Try again in a minute!"
+      );
+
+      return;
+    }
+  }
+
   const conversationHistory: ConversationMessage[] = context.conversationHistory || [];
 
   const startDate = DateTime.now().minus({ days: 7 }).toISODate();

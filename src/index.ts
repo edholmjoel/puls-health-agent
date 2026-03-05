@@ -21,12 +21,79 @@ app.use(helmet());
 app.use(cors());
 app.use(requestLogger);
 
-app.get('/health', (_req: Request, res: Response) => {
-  res.json({
-    status: 'healthy',
-    timestamp: new Date().toISOString(),
-    uptime: process.uptime(),
-  });
+app.get('/health', async (_req: Request, res: Response): Promise<any> => {
+  try {
+    const health: any = {
+      status: 'ok',
+      timestamp: new Date().toISOString(),
+      uptime: process.uptime(),
+      environment: process.env.NODE_ENV || 'development',
+      nodeVersion: process.version,
+    };
+
+    // Check database connectivity
+    try {
+      const users = await supabaseService.getActiveUsers();
+      health.services = {
+        database: {
+          status: 'healthy',
+          activeUsers: users.length,
+        },
+      };
+    } catch (error: any) {
+      health.services = {
+        database: {
+          status: 'unhealthy',
+          error: error.message,
+        },
+      };
+      health.status = 'degraded';
+    }
+
+    // Get cron job schedules (only if jobs are initialized)
+    try {
+      // Import job instances to check their status
+      const { staleDataCheckJob } = await import('./jobs/stale-data-check');
+      const { scheduledRemindersJob } = await import('./jobs/scheduled-reminders');
+
+      health.jobs = {
+        dailyBrief: {
+          schedule: '0 7 * * * (Europe/Stockholm)',
+          description: 'Daily health briefs at 7am',
+        },
+        scheduledReminders: {
+          schedule: '0 * * * * (Europe/Stockholm)',
+          nextRun: scheduledRemindersJob.nextDate()?.toISO() || 'not scheduled',
+        },
+        staleDataCheck: {
+          schedule: '0 */6 * * * (Europe/Stockholm)',
+          nextRun: staleDataCheckJob.nextDate()?.toISO() || 'not scheduled',
+        },
+      };
+    } catch (error: any) {
+      health.jobs = {
+        status: 'unable to fetch',
+        error: error.message,
+      };
+    }
+
+    // Memory usage
+    const memUsage = process.memoryUsage();
+    health.memory = {
+      heapUsed: `${Math.round(memUsage.heapUsed / 1024 / 1024)}MB`,
+      heapTotal: `${Math.round(memUsage.heapTotal / 1024 / 1024)}MB`,
+      rss: `${Math.round(memUsage.rss / 1024 / 1024)}MB`,
+    };
+
+    res.json(health);
+  } catch (error: any) {
+    logger.error('Health check failed', { error: error.message });
+    res.status(503).json({
+      status: 'error',
+      timestamp: new Date().toISOString(),
+      error: error.message,
+    });
+  }
 });
 
 // Test endpoint to trigger historical data resync
