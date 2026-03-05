@@ -30,7 +30,7 @@ app.get('/health', (_req: Request, res: Response) => {
 });
 
 // Test endpoint to trigger historical data resync
-app.post('/test/resync-historical', express.json(), async (req: Request, res: Response) => {
+app.post('/test/resync-historical', express.json(), async (req: Request, res: Response): Promise<any> => {
   try {
     const { provider = 'garmin' } = req.body;
     const user = await supabaseService.getUserByPhone('+46766334597');
@@ -64,7 +64,7 @@ app.post('/test/resync-historical', express.json(), async (req: Request, res: Re
 });
 
 // Test endpoint to trigger Junction data refresh
-app.post('/test/refresh-junction', express.json(), async (_req: Request, res: Response) => {
+app.post('/test/refresh-junction', express.json(), async (_req: Request, res: Response): Promise<any> => {
   try {
     const user = await supabaseService.getUserByPhone('+46766334597');
     if (!user || !user.junction_user_id) {
@@ -92,7 +92,7 @@ app.post('/test/refresh-junction', express.json(), async (_req: Request, res: Re
 });
 
 // Test endpoint to check wearable data count
-app.get('/test/check-data', async (_req: Request, res: Response) => {
+app.get('/test/check-data', async (_req: Request, res: Response): Promise<any> => {
   try {
     const user = await supabaseService.getUserByPhone('+46766334597');
     if (!user) {
@@ -106,7 +106,7 @@ app.get('/test/check-data', async (_req: Request, res: Response) => {
       totalRecords: data.length,
       latestRecords: data.slice(0, 3).map(r => ({
         event_type: r.event_type,
-        date: r.payload?.date,
+        date: (r.payload as any)?.date,
         received_at: r.received_at
       }))
     });
@@ -117,7 +117,7 @@ app.get('/test/check-data', async (_req: Request, res: Response) => {
 });
 
 // Test endpoint to store mock wearable data (bypass webhook verification)
-app.post('/test/store-data', express.json(), async (req: Request, res: Response) => {
+app.post('/test/store-data', express.json(), async (req: Request, res: Response): Promise<any> => {
   try {
     const { days = 5 } = req.body;
     const user = await supabaseService.getUserByPhone('+46766334597');
@@ -227,7 +227,7 @@ app.post('/test/store-data', express.json(), async (req: Request, res: Response)
 });
 
 // Test endpoint to manually sync historical data
-app.post('/test/sync-data', express.json(), async (req: Request, res: Response) => {
+app.post('/test/sync-data', express.json(), async (req: Request, res: Response): Promise<any> => {
   try {
     const { phoneNumber, startDate: customStartDate, endDate: customEndDate } = req.body;
     if (!phoneNumber) {

@@ -68,25 +68,28 @@ export interface Database {
         Row: {
           id: string;
           user_id: string;
-          data_type: string;
-          data: Json;
-          source_event_id: string;
+          junction_user_id: string;
+          event_type: string;
+          provider: string | null;
+          payload: Json;
           received_at: string;
         };
         Insert: {
           id?: string;
           user_id: string;
-          data_type: string;
-          data: Json;
-          source_event_id: string;
+          junction_user_id: string;
+          event_type: string;
+          provider?: string | null;
+          payload: Json;
           received_at?: string;
         };
         Update: {
           id?: string;
           user_id?: string;
-          data_type?: string;
-          data?: Json;
-          source_event_id?: string;
+          junction_user_id?: string;
+          event_type?: string;
+          provider?: string | null;
+          payload?: Json;
           received_at?: string;
         };
       };

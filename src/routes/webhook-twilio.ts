@@ -203,7 +203,7 @@ async function handleAwaitingName(
   logger.info('Connection link sent to user', {
     requestId,
     userId,
-    junctionUserId: junctionUser.user_id,
+    junctionUserId,
   });
 }
 
@@ -272,7 +272,8 @@ async function handleActiveConversation(
     return;
   }
 
-  let wearableData = [];
+  // Fetch wearable data
+  let wearableData: any[] = [];
   try {
     wearableData = await supabaseService.getWearableDataForUser(user.id, startDate, endDate);
     logger.info('Fetched wearable data', {
@@ -311,7 +312,24 @@ async function handleActiveConversation(
     workoutsCount: healthData.workouts?.length || 0
   });
 
-  let response: string;
+  // Fetch user memories
+  let memories: any[] = [];
+  try {
+    memories = await supabaseService.getActiveMemories(user.id, 20);
+    logger.info('Fetched user memories', {
+      requestId,
+      userId: user.id,
+      memoryCount: memories.length
+    });
+  } catch (error: any) {
+    logger.warn('Could not fetch memories, proceeding without them', {
+      requestId,
+      userId: user.id,
+      error: error.message
+    });
+  }
+
+  let rawResponse: string;
 
   if (
     lowerMessage.includes('brief') ||
@@ -319,14 +337,88 @@ async function handleActiveConversation(
     lowerMessage.includes('status') ||
     lowerMessage.includes('how am i')
   ) {
-    response = await anthropicService.generateDailyBrief(user.name || 'there', healthData);
+    rawResponse = await anthropicService.generateDailyBrief(user.name || 'there', healthData);
     logger.info('Generated on-demand brief', { requestId, userId: user.id });
   } else {
-    response = await anthropicService.generateResponse(conversationHistory, message, healthData);
+    rawResponse = await anthropicService.generateResponse(conversationHistory, message, healthData, memories);
     logger.info('Generated conversational response', { requestId, userId: user.id });
   }
 
-  await twilioService.sendMessage(phoneNumber, response);
+  // Extract memory commands from response
+  const extracted = anthropicService.extractMemoryCommands(rawResponse);
+  const response = extracted.cleanResponse;
+
+  // Handle memory extract
+  if (extracted.memoryExtract) {
+    try {
+      await supabaseService.storeMemory({
+        user_id: user.id,
+        memory_type: extracted.memoryExtract.type,
+        content: extracted.memoryExtract.content,
+        scheduled_for: extracted.memoryExtract.scheduledFor,
+      });
+      logger.info('Memory stored from conversation', {
+        requestId,
+        userId: user.id,
+        type: extracted.memoryExtract.type,
+        scheduled: !!extracted.memoryExtract.scheduledFor
+      });
+    } catch (error: any) {
+      logger.error('Failed to store memory', {
+        requestId,
+        userId: user.id,
+        error: error.message
+      });
+    }
+  }
+
+  // Handle list memories request
+  if (extracted.listMemories) {
+    let memoryList = '';
+    if (memories.length === 0) {
+      memoryList = '\n\nI don\'t have anything stored yet bro';
+    } else {
+      memoryList = '\n\nHere\'s what I remember:\n';
+      for (const mem of memories) {
+        memoryList += `- ${mem.content}\n`;
+      }
+    }
+    // Split into multiple messages for rapid-fire effect
+    const messages = anthropicService.splitIntoMessages(response + memoryList);
+    await twilioService.sendMultipleMessages(phoneNumber, messages);
+  } else if (extracted.forgetMemory) {
+    // Handle forget memory request
+    try {
+      const foundMemories = await supabaseService.searchMemories(user.id, extracted.forgetMemory.search);
+      if (foundMemories.length > 0) {
+        for (const mem of foundMemories) {
+          await supabaseService.deleteMemory(mem.id);
+        }
+        const messages = anthropicService.splitIntoMessages(response + '\n\nAlright, forgot about that 👍');
+        await twilioService.sendMultipleMessages(phoneNumber, messages);
+        logger.info('Memories deleted', {
+          requestId,
+          userId: user.id,
+          count: foundMemories.length
+        });
+      } else {
+        const messages = anthropicService.splitIntoMessages(response + '\n\nI don\'t think I had that stored anyway');
+        await twilioService.sendMultipleMessages(phoneNumber, messages);
+      }
+    } catch (error: any) {
+      logger.error('Failed to forget memory', {
+        requestId,
+        userId: user.id,
+        error: error.message
+      });
+      const messages = anthropicService.splitIntoMessages(response);
+      await twilioService.sendMultipleMessages(phoneNumber, messages);
+    }
+  } else {
+    // Normal response - split into multiple messages for rapid-fire effect
+    const messages = anthropicService.splitIntoMessages(response);
+    await twilioService.sendMultipleMessages(phoneNumber, messages);
+  }
 
   const updatedHistory: ConversationMessage[] = [
     ...conversationHistory.slice(-10),

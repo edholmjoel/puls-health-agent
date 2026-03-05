@@ -56,6 +56,51 @@ class TwilioService {
     }
   }
 
+  /**
+   * Send multiple messages sequentially with small delays between them
+   * Creates the rapid-fire texting effect like Poke
+   * @param to - Phone number (e.g., '+46766334597')
+   * @param messages - Array of message strings to send
+   * @param delayMs - Milliseconds to wait between messages (default 150ms)
+   */
+  async sendMultipleMessages(to: string, messages: string[], delayMs: number = 150): Promise<void> {
+    try {
+      const formattedTo = to.startsWith('whatsapp:') ? to : `whatsapp:${to}`;
+
+      for (let i = 0; i < messages.length; i++) {
+        await this.client.messages.create({
+          from: this.whatsappNumber,
+          to: formattedTo,
+          body: messages[i],
+        });
+
+        logger.debug('Sequential message sent', {
+          to: formattedTo,
+          messageIndex: i + 1,
+          totalMessages: messages.length,
+          bodyLength: messages[i].length,
+        });
+
+        // Add delay between messages (except after the last one)
+        if (i < messages.length - 1) {
+          await new Promise(resolve => setTimeout(resolve, delayMs));
+        }
+      }
+
+      logger.info('Multiple WhatsApp messages sent', {
+        to: formattedTo,
+        messageCount: messages.length,
+        totalDelay: delayMs * (messages.length - 1),
+      });
+    } catch (error: any) {
+      logger.error('Failed to send multiple WhatsApp messages', {
+        to,
+        error: error.message,
+      });
+      throw new ExternalServiceError('Twilio', `Failed to send messages: ${error.message}`);
+    }
+  }
+
   validateRequest(url: string, params: Record<string, string>, signature: string): boolean {
     try {
       const isValid = twilio.validateRequest(this.authToken, signature, url, params);

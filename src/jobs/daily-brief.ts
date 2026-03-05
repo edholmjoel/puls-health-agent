@@ -95,25 +95,27 @@ async function sendDailyBriefToUser(user: any): Promise<void> {
 
     const healthData: UserHealthData = {
       sleep: wearableData
-        .filter((d) => d.data_type === 'sleep')
-        .map((d) => d.data as any)
+        .filter((d) => d.event_type && d.event_type.includes('sleep'))
+        .map((d) => d.payload as any)
         .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
         .slice(0, 3),
       activity: wearableData
-        .filter((d) => d.data_type === 'activity')
-        .map((d) => d.data as any)
+        .filter((d) => d.event_type && d.event_type.includes('activity'))
+        .map((d) => d.payload as any)
         .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
         .slice(0, 3),
       workouts: wearableData
-        .filter((d) => d.data_type === 'workout')
-        .map((d) => d.data as any)
+        .filter((d) => d.event_type && d.event_type.includes('workout'))
+        .map((d) => d.payload as any)
         .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
         .slice(0, 5),
     };
 
     const briefContent = await anthropicService.generateDailyBrief(userName, healthData);
 
-    await twilioService.sendMessage(phoneNumber, briefContent);
+    // Split into multiple messages for rapid-fire effect
+    const messages = anthropicService.splitIntoMessages(briefContent);
+    await twilioService.sendMultipleMessages(phoneNumber, messages);
 
     await supabaseService.storeDailyBrief({
       user_id: userId,
@@ -125,6 +127,7 @@ async function sendDailyBriefToUser(user: any): Promise<void> {
     logger.info('Daily brief sent successfully', {
       userId,
       userName,
+      messageCount: messages.length,
       contentLength: briefContent.length,
     });
   } catch (error: any) {

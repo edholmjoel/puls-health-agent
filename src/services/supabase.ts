@@ -8,11 +8,11 @@ import {
   DbConversationState,
   DbConversationStateInsert,
   DbConversationStateUpdate,
-  DbWearableDataInsert,
   DbWearableData,
   DbDailyBriefInsert,
   DbDailyBrief,
 } from '../types/database';
+import { DbMemory, DbMemoryInsert, DbMemoryUpdate } from '../types/memory';
 import { ExternalServiceError } from '../errors/AppError';
 import logger from '../utils/logger';
 
@@ -365,6 +365,137 @@ class SupabaseService {
       if (error instanceof ExternalServiceError) throw error;
       logger.error('Error fetching daily brief', { userId, date, error });
       throw new ExternalServiceError('Supabase', 'Failed to fetch daily brief');
+    }
+  }
+
+  // Memory operations
+  async storeMemory(memoryData: DbMemoryInsert): Promise<DbMemory> {
+    try {
+      const { data, error } = await this.client
+        .from('user_memories')
+        .insert(memoryData as any)
+        .select()
+        .single();
+
+      if (error) {
+        throw new ExternalServiceError('Supabase', error.message);
+      }
+
+      logger.info('Memory stored', {
+        userId: memoryData.user_id,
+        type: memoryData.memory_type,
+        scheduled: !!memoryData.scheduled_for,
+      });
+      return data;
+    } catch (error) {
+      if (error instanceof ExternalServiceError) throw error;
+      logger.error('Error storing memory', { memoryData, error });
+      throw new ExternalServiceError('Supabase', 'Failed to store memory');
+    }
+  }
+
+  async getActiveMemories(userId: string, limit: number = 20): Promise<DbMemory[]> {
+    try {
+      const { data, error } = await this.client
+        .from('user_memories')
+        .select('*')
+        .eq('user_id', userId)
+        .is('deleted_at', null)
+        .order('created_at', { ascending: false })
+        .limit(limit);
+
+      if (error) {
+        throw new ExternalServiceError('Supabase', error.message);
+      }
+
+      return data || [];
+    } catch (error) {
+      if (error instanceof ExternalServiceError) throw error;
+      logger.error('Error fetching memories', { userId, error });
+      throw new ExternalServiceError('Supabase', 'Failed to fetch memories');
+    }
+  }
+
+  async getScheduledReminders(beforeDate: string): Promise<DbMemory[]> {
+    try {
+      const { data, error } = await this.client
+        .from('user_memories')
+        .select('*')
+        .eq('memory_type', 'reminder')
+        .is('reminded_at', null)
+        .is('deleted_at', null)
+        .lte('scheduled_for', beforeDate);
+
+      if (error) {
+        throw new ExternalServiceError('Supabase', error.message);
+      }
+
+      return data || [];
+    } catch (error) {
+      if (error instanceof ExternalServiceError) throw error;
+      logger.error('Error fetching scheduled reminders', { beforeDate, error });
+      throw new ExternalServiceError('Supabase', 'Failed to fetch scheduled reminders');
+    }
+  }
+
+  async updateMemory(memoryId: string, updates: DbMemoryUpdate): Promise<DbMemory> {
+    try {
+      const { data, error } = await (this.client.from('user_memories') as any)
+        .update({ ...updates, updated_at: new Date().toISOString() })
+        .eq('id', memoryId)
+        .select()
+        .single();
+
+      if (error) {
+        throw new ExternalServiceError('Supabase', error.message);
+      }
+
+      logger.info('Memory updated', { memoryId, updates });
+      return data as DbMemory;
+    } catch (error) {
+      if (error instanceof ExternalServiceError) throw error;
+      logger.error('Error updating memory', { memoryId, updates, error });
+      throw new ExternalServiceError('Supabase', 'Failed to update memory');
+    }
+  }
+
+  async deleteMemory(memoryId: string): Promise<void> {
+    try {
+      const { error } = await (this.client.from('user_memories') as any)
+        .update({ deleted_at: new Date().toISOString() })
+        .eq('id', memoryId);
+
+      if (error) {
+        throw new ExternalServiceError('Supabase', error.message);
+      }
+
+      logger.info('Memory deleted', { memoryId });
+    } catch (error) {
+      if (error instanceof ExternalServiceError) throw error;
+      logger.error('Error deleting memory', { memoryId, error });
+      throw new ExternalServiceError('Supabase', 'Failed to delete memory');
+    }
+  }
+
+  async searchMemories(userId: string, searchTerm: string): Promise<DbMemory[]> {
+    try {
+      const { data, error } = await this.client
+        .from('user_memories')
+        .select('*')
+        .eq('user_id', userId)
+        .is('deleted_at', null)
+        .ilike('content', `%${searchTerm}%`)
+        .order('created_at', { ascending: false });
+
+      if (error) {
+        throw new ExternalServiceError('Supabase', error.message);
+      }
+
+      return data || [];
+    } catch (error) {
+      if (error instanceof ExternalServiceError) throw error;
+      logger.error('Error searching memories', { userId, searchTerm, error });
+      throw new ExternalServiceError('Supabase', 'Failed to search memories');
     }
   }
 }

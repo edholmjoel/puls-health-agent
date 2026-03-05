@@ -1,5 +1,6 @@
 import { CronJob } from 'cron';
 import { runDailyBrief } from './daily-brief';
+import { scheduledRemindersJob } from './scheduled-reminders';
 import logger from '../utils/logger';
 
 export function initializeJobs(): void {
@@ -27,5 +28,14 @@ export function initializeJobs(): void {
     schedule: '0 7 * * *',
     timezone: 'Europe/Stockholm',
     nextRun: dailyBriefJob.nextDate().toISO(),
+  });
+
+  // Start scheduled reminders job
+  scheduledRemindersJob.start();
+
+  logger.info('Scheduled reminders job initialized', {
+    schedule: '0 * * * *',
+    timezone: 'Europe/Stockholm',
+    nextRun: scheduledRemindersJob.nextDate().toISO(),
   });
 }
