@@ -25,7 +25,14 @@ async function checkBenWorkouts() {
     console.log(`   ${type}: ${count}`);
   });
 
-  const workouts = data.filter((d: any) => d.event_type.includes('workout'));
+  // Check with new pattern that matches both workout and workouts
+  const { data: workoutData } = await (supabaseService as any).client
+    .from('wearable_data')
+    .select('event_type, received_at, payload')
+    .eq('user_id', ben.id)
+    .or('event_type.ilike.%workout%.created');
+
+  const workouts = workoutData || [];
   console.log(`\n🏃 Workout events: ${workouts.length}`);
 
   if (workouts.length > 0) {

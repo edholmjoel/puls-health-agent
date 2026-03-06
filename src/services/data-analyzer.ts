@@ -117,11 +117,11 @@ class DataAnalyzerService {
           medium_activity_minutes: medium,
           low_activity_minutes: low,
         });
-      } else if (eventType.includes('workout.created') && payload) {
+      } else if ((eventType.includes('workout.created') || eventType.includes('workouts.created')) && payload) {
         healthData.workouts?.push({
           date: payload.calendar_date || payload.date || item.received_at.split('T')[0],
           title: payload.title || 'Workout',
-          sport: payload.sport || 'unknown',
+          sport: payload.sport?.name || payload.sport || 'unknown',
           duration: payload.duration || payload.moving_time || 0,
           distance: payload.distance || 0,
           calories: payload.calories || 0,
