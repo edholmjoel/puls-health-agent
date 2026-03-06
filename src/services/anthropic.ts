@@ -364,7 +364,9 @@ Keep it real, keep it short (under 150 words total). Text like you're messaging 
 
     if (healthData.workouts && healthData.workouts.length > 0) {
       const workout = healthData.workouts[0];
-      context += `Recent workout: ${workout.title} (${workout.sport}), ${Math.round(workout.duration / 60)} min\n`;
+      const sport = typeof workout.sport === 'string' ? workout.sport : (workout.sport?.name || 'workout');
+      const duration = workout.duration || (workout as any).moving_time || 0;
+      context += `Recent workout: ${workout.title} (${sport}), ${Math.round(duration / 60)} min\n`;
     }
 
     return context.trim();
