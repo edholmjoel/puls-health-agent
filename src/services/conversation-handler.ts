@@ -120,7 +120,7 @@ export async function handleAwaitingConnection(
     });
 
     const linkUrl = context.linkToken
-      ? `https://link.eu.tryvital.io/?token=${context.linkToken}`
+      ? `https://link.tryvital.io/?token=${context.linkToken}&env=sandbox&region=eu`
       : 'the link I sent you earlier';
 
     await messageHandler.sendMessage(
