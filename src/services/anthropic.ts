@@ -327,9 +327,11 @@ When they ask "what do you remember?" or "forget about X", respond naturally but
 
     if (healthData.workouts && healthData.workouts.length > 0) {
       const latestWorkout = healthData.workouts[0];
+      const sport = typeof latestWorkout.sport === 'string' ? latestWorkout.sport : (latestWorkout.sport?.name || 'workout');
+      const duration = latestWorkout.duration || (latestWorkout as any).moving_time || 0;
       prompt += `Last workout:\n`;
-      prompt += `- ${latestWorkout.title} (${latestWorkout.sport})\n`;
-      prompt += `- ${Math.round(latestWorkout.duration / 60)} minutes\n`;
+      prompt += `- ${latestWorkout.title} (${sport})\n`;
+      prompt += `- ${Math.round(duration / 60)} minutes\n`;
       if (latestWorkout.distance) {
         prompt += `- ${(latestWorkout.distance / 1000).toFixed(2)}km\n`;
       }
