@@ -1,6 +1,7 @@
 import { CronJob } from 'cron';
 import supabaseService from '../services/supabase';
 import twilioService from '../services/twilio';
+import telegramService from '../services/telegram';
 import logger from '../utils/logger';
 
 /**
@@ -21,6 +22,17 @@ export async function checkStaleData(): Promise<void> {
 
     for (const user of users) {
       try {
+        const platform = user.platform || 'whatsapp';
+        const userIdentifier = platform === 'telegram' ? user.telegram_user_id : user.phone_number;
+
+        if (!userIdentifier) {
+          logger.warn('User missing identifier for stale data check', {
+            userId: user.id,
+            platform,
+          });
+          continue;
+        }
+
         // Get the most recent wearable data for this user
         const sevenDaysAgo = new Date();
         sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
@@ -34,16 +46,24 @@ export async function checkStaleData(): Promise<void> {
           // No data at all in the last 7 days - definitely stale
           logger.warn('User has no wearable data in last 7 days', {
             userId: user.id,
-            phoneNumber: user.phone_number,
+            platform,
           });
 
-          await twilioService.sendMessage(
-            user.phone_number,
-            "Haven't seen any data from your wearable in over a week! Make sure it's synced with your phone and connected to the internet."
-          );
+          if (platform === 'telegram') {
+            await telegramService.sendMessage(
+              userIdentifier as number,
+              "Haven't seen any data from your wearable in over a week! Make sure it's synced with your phone and connected to the internet."
+            );
+          } else {
+            await twilioService.sendMessage(
+              userIdentifier as string,
+              "Haven't seen any data from your wearable in over a week! Make sure it's synced with your phone and connected to the internet."
+            );
+          }
 
           logger.info('Stale data notification sent', {
             userId: user.id,
+            platform,
             daysSinceData: '7+',
           });
           continue;
@@ -67,17 +87,25 @@ export async function checkStaleData(): Promise<void> {
 
           logger.info('Stale data detected for user', {
             userId: user.id,
-            phoneNumber: user.phone_number,
+            platform,
             hoursSinceLastSync: hoursSince,
           });
 
-          await twilioService.sendMessage(
-            user.phone_number,
-            `Haven't seen data from your wearable in ${hoursSince}h. Make sure it's synced with your phone!`
-          );
+          if (platform === 'telegram') {
+            await telegramService.sendMessage(
+              userIdentifier as number,
+              `Haven't seen data from your wearable in ${hoursSince}h. Make sure it's synced with your phone!`
+            );
+          } else {
+            await twilioService.sendMessage(
+              userIdentifier as string,
+              `Haven't seen data from your wearable in ${hoursSince}h. Make sure it's synced with your phone!`
+            );
+          }
 
           logger.info('Stale data notification sent', {
             userId: user.id,
+            platform,
             hoursSinceSync: hoursSince,
           });
         }

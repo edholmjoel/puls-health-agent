@@ -52,6 +52,26 @@ class SupabaseService {
     }
   }
 
+  async getUserByTelegramId(telegramUserId: number): Promise<DbUser | null> {
+    try {
+      const { data, error } = await this.client
+        .from('users')
+        .select('*')
+        .eq('telegram_user_id', telegramUserId)
+        .single();
+
+      if (error && error.code !== 'PGRST116') {
+        throw new ExternalServiceError('Supabase', error.message);
+      }
+
+      return data;
+    } catch (error) {
+      if (error instanceof ExternalServiceError) throw error;
+      logger.error('Error fetching user by Telegram ID', { telegramUserId, error });
+      throw new ExternalServiceError('Supabase', 'Failed to fetch user');
+    }
+  }
+
   async getUserByJunctionId(junctionUserId: string): Promise<DbUser | null> {
     try {
       const { data, error } = await this.client
@@ -124,12 +144,18 @@ class SupabaseService {
     }
   }
 
-  async getActiveUsers(): Promise<DbUser[]> {
+  async getActiveUsers(platform?: 'whatsapp' | 'telegram'): Promise<DbUser[]> {
     try {
-      const { data, error } = await this.client
+      let query = this.client
         .from('users')
         .select('*')
         .eq('onboarding_complete', true);
+
+      if (platform) {
+        query = query.eq('platform', platform);
+      }
+
+      const { data, error } = await query;
 
       if (error) {
         throw new ExternalServiceError('Supabase', error.message);
@@ -138,7 +164,7 @@ class SupabaseService {
       return data || [];
     } catch (error) {
       if (error instanceof ExternalServiceError) throw error;
-      logger.error('Error fetching active users', { error });
+      logger.error('Error fetching active users', { platform, error });
       throw new ExternalServiceError('Supabase', 'Failed to fetch active users');
     }
   }

@@ -3,6 +3,7 @@ import express from 'express';
 import junctionService from '../services/junction';
 import supabaseService from '../services/supabase';
 import twilioService from '../services/twilio';
+import telegramService from '../services/telegram';
 import notificationService from '../services/notifications';
 import {
   JunctionWebhookEvent,
@@ -291,11 +292,23 @@ async function handleConnectionCreated(
 
   const confirmationMessage = `Your ${provider} is connected! I'll start analyzing your data and send you daily health briefs every morning at 7am. Feel free to ask me anything about your health and fitness!`;
 
-  await twilioService.sendMessage(user.phone_number, confirmationMessage);
+  // Send via appropriate platform
+  const platform = user.platform || 'whatsapp';
+  if (platform === 'telegram' && user.telegram_user_id) {
+    await telegramService.sendMessage(user.telegram_user_id, confirmationMessage);
+  } else if (platform === 'whatsapp' && user.phone_number) {
+    await twilioService.sendMessage(user.phone_number, confirmationMessage);
+  } else {
+    logger.warn('User missing identifier for connection confirmation', {
+      userId: user.id,
+      platform,
+    });
+  }
 
   logger.info('User onboarding completed', {
     requestId,
     userId: user.id,
+    platform,
     provider,
   });
 }

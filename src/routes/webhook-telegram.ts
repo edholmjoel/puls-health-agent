@@ -1,10 +1,8 @@
 import { Router, Request, Response } from 'express';
 import express from 'express';
-import twilio from 'twilio';
-const MessagingResponse = twilio.twiml.MessagingResponse;
-import twilioService from '../services/twilio';
+import telegramService from '../services/telegram';
 import supabaseService from '../services/supabase';
-import { TwilioWebhookPayload } from '../types/twilio';
+import { TelegramUpdate } from '../types/telegram';
 import { StateContext } from '../types/conversation';
 import {
   handleAwaitingName,
@@ -17,60 +15,55 @@ import { RequestWithId } from '../middleware/requestLogger';
 
 const router = Router();
 
-router.post(
-  '/',
-  express.urlencoded({ extended: false }),
-  async (req: Request, res: Response) => {
-    const requestId = (req as RequestWithId).id;
-    const payload = req.body as TwilioWebhookPayload;
+router.post('/', express.json(), async (req: Request, res: Response): Promise<any> => {
+  const requestId = (req as RequestWithId).id;
+  const update = req.body as TelegramUpdate;
 
-    try {
-      logger.info('Twilio webhook received', {
-        requestId,
-        from: payload.From,
-        messageSid: payload.MessageSid,
-        bodyLength: payload.Body?.length,
-      });
+  try {
+    logger.info('Telegram webhook received', {
+      requestId,
+      updateId: update.update_id,
+      hasMessage: !!update.message,
+    });
 
-      const url = `${req.protocol}://${req.get('host')}${req.originalUrl}`;
-      const signature = req.headers['x-twilio-signature'] as string;
-
-      if (!twilioService.validateRequest(url, req.body, signature)) {
-        logger.warn('Invalid Twilio webhook signature', { requestId });
-      }
-
-      const phoneNumber = payload.From.replace('whatsapp:', '');
-      const userMessage = payload.Body;
-
-      await handleIncomingMessage(phoneNumber, userMessage, requestId);
-
-      const twiml = new MessagingResponse();
-      res.type('text/xml');
-      res.send(twiml.toString());
-    } catch (error: any) {
-      logger.error('Twilio webhook processing failed', {
-        requestId,
-        error: error.message,
-        stack: error.stack,
-      });
-
-      const twiml = new MessagingResponse();
-      res.type('text/xml');
-      res.send(twiml.toString());
+    // Only process text messages
+    if (!update.message || !update.message.text || !update.message.from) {
+      logger.debug('Ignoring non-text message', { requestId });
+      return res.json({ ok: true });
     }
+
+    const telegramUserId = update.message.from.id;
+    const userMessage = update.message.text;
+    const chatId = update.message.chat.id;
+
+    await handleIncomingMessage(telegramUserId, chatId, userMessage, requestId);
+
+    return res.json({ ok: true });
+  } catch (error: any) {
+    logger.error('Telegram webhook processing failed', {
+      requestId,
+      error: error.message,
+      stack: error.stack,
+    });
+
+    // Always return 200 to Telegram to avoid retries
+    return res.json({ ok: true });
   }
-);
+});
 
 async function handleIncomingMessage(
-  phoneNumber: string,
+  telegramUserId: number,
+  chatId: number,
   message: string,
   requestId: string
 ): Promise<void> {
-  let user = await supabaseService.getUserByPhone(phoneNumber);
+  let user = await supabaseService.getUserByTelegramId(telegramUserId);
 
   if (!user) {
+    // Create new user for Telegram
     user = await supabaseService.createUser({
-      phone_number: phoneNumber,
+      telegram_user_id: telegramUserId,
+      platform: 'telegram',
       onboarding_complete: false,
     });
 
@@ -80,15 +73,15 @@ async function handleIncomingMessage(
       context: {},
     });
 
-    await twilioService.sendMessage(
-      phoneNumber,
+    await telegramService.sendMessage(
+      chatId,
       "Hey! I'm Puls, your personal AI health coach. What's your name?"
     );
 
-    logger.info('New user created and greeted', {
+    logger.info('New Telegram user created and greeted', {
       requestId,
       userId: user.id,
-      phoneNumber,
+      telegramUserId,
     });
 
     return;
@@ -107,8 +100,8 @@ async function handleIncomingMessage(
       context: {},
     });
 
-    await twilioService.sendMessage(
-      phoneNumber,
+    await telegramService.sendMessage(
+      chatId,
       "Hey! I'm Puls, your personal AI health coach. What's your name?"
     );
 
@@ -123,30 +116,30 @@ async function handleIncomingMessage(
   const currentState = conversationState.state;
   const context = (conversationState.context as StateContext) || {};
 
-  logger.info('Processing message for user', {
+  logger.info('Processing message for Telegram user', {
     requestId,
     userId: user.id,
     state: currentState,
     message: message.substring(0, 50),
   });
 
-  // Create messaging adapter for Twilio
+  // Create messaging adapter for Telegram
   const messagingAdapter: MessageHandler = {
     sendMessage: async (to: string | number, text: string) => {
-      await twilioService.sendMessage(String(to), text);
+      await telegramService.sendMessage(Number(to), text);
     },
     sendMultipleMessages: async (to: string | number, messages: string[]) => {
-      await twilioService.sendMultipleMessages(String(to), messages);
+      await telegramService.sendMultipleMessages(Number(to), messages);
     },
   };
 
   // Route to appropriate handler based on conversation state
   if (currentState === 'awaiting_name') {
-    await handleAwaitingName(user.id, phoneNumber, message, context, messagingAdapter, requestId);
+    await handleAwaitingName(user.id, chatId, message, context, messagingAdapter, requestId);
   } else if (currentState === 'awaiting_connection') {
-    await handleAwaitingConnection(user.id, phoneNumber, message, context, messagingAdapter, requestId);
+    await handleAwaitingConnection(user.id, chatId, message, context, messagingAdapter, requestId);
   } else if (currentState === 'active') {
-    await handleActiveConversation(user, phoneNumber, message, context, messagingAdapter, 'whatsapp', requestId);
+    await handleActiveConversation(user, chatId, message, context, messagingAdapter, 'telegram', requestId);
   } else {
     logger.warn('Unknown conversation state', {
       requestId,

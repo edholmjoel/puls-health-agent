@@ -12,7 +12,9 @@ export interface Database {
       users: {
         Row: {
           id: string;
-          phone_number: string;
+          phone_number: string | null;
+          telegram_user_id: number | null;
+          platform: 'whatsapp' | 'telegram';
           name: string | null;
           junction_user_id: string | null;
           onboarding_complete: boolean;
@@ -21,7 +23,9 @@ export interface Database {
         };
         Insert: {
           id?: string;
-          phone_number: string;
+          phone_number?: string | null;
+          telegram_user_id?: number | null;
+          platform?: 'whatsapp' | 'telegram';
           name?: string | null;
           junction_user_id?: string | null;
           onboarding_complete?: boolean;
@@ -30,7 +34,9 @@ export interface Database {
         };
         Update: {
           id?: string;
-          phone_number?: string;
+          phone_number?: string | null;
+          telegram_user_id?: number | null;
+          platform?: 'whatsapp' | 'telegram';
           name?: string | null;
           junction_user_id?: string | null;
           onboarding_complete?: boolean;

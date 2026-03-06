@@ -1,4 +1,5 @@
 import twilioService from './twilio';
+import telegramService from './telegram';
 import supabaseService from './supabase';
 import { DbUser } from '../types/database';
 import logger from '../utils/logger';
@@ -95,8 +96,19 @@ class NotificationService {
         return;
       }
 
-      // Send the notification
-      await twilioService.sendMessage(user.phone_number, message);
+      // Send the notification via appropriate platform
+      const platform = user.platform || 'whatsapp';
+      if (platform === 'telegram' && user.telegram_user_id) {
+        await telegramService.sendMessage(user.telegram_user_id, message);
+      } else if (platform === 'whatsapp' && user.phone_number) {
+        await twilioService.sendMessage(user.phone_number, message);
+      } else {
+        logger.warn('User missing identifier for proactive notification', {
+          userId: user.id,
+          platform,
+        });
+        return;
+      }
 
       // Update conversation state
       const conversationState = await supabaseService.getConversationState(user.id);

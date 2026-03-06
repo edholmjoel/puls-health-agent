@@ -9,10 +9,12 @@ import { requestLogger } from './middleware/requestLogger';
 import { errorHandler } from './middleware/errorHandler';
 import junctionWebhookRouter from './routes/webhook-junction';
 import twilioWebhookRouter from './routes/webhook-twilio';
+import telegramWebhookRouter from './routes/webhook-telegram';
 import { initializeJobs } from './jobs';
 import logger from './utils/logger';
 import supabaseService from './services/supabase';
 import junctionService from './services/junction';
+import telegramService from './services/telegram';
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -34,10 +36,15 @@ app.get('/health', async (_req: Request, res: Response): Promise<any> => {
     // Check database connectivity
     try {
       const users = await supabaseService.getActiveUsers();
+      const whatsappUsers = users.filter(u => u.platform === 'whatsapp').length;
+      const telegramUsers = users.filter(u => u.platform === 'telegram').length;
+
       health.services = {
         database: {
           status: 'healthy',
           activeUsers: users.length,
+          whatsappUsers,
+          telegramUsers,
         },
       };
     } catch (error: any) {
@@ -46,6 +53,22 @@ app.get('/health', async (_req: Request, res: Response): Promise<any> => {
           status: 'unhealthy',
           error: error.message,
         },
+      };
+      health.status = 'degraded';
+    }
+
+    // Check Telegram bot status
+    try {
+      const botInfo = await telegramService.getMe();
+      health.services.telegram = {
+        status: 'healthy',
+        botUsername: botInfo.result.username,
+        botId: botInfo.result.id,
+      };
+    } catch (error: any) {
+      health.services.telegram = {
+        status: 'unhealthy',
+        error: error.message,
       };
       health.status = 'degraded';
     }
@@ -408,17 +431,19 @@ app.post('/test/sync-data', express.json(), async (req: Request, res: Response):
 
 app.use('/webhooks/junction', junctionWebhookRouter);
 app.use('/webhooks/twilio', twilioWebhookRouter);
+app.use('/webhooks/telegram', telegramWebhookRouter);
 
 app.get('/', (_req: Request, res: Response) => {
   res.json({
     name: 'Puls Health Agent',
     version: '1.0.0',
-    description: 'AI health coaching agent via WhatsApp',
+    description: 'AI health coaching agent via WhatsApp and Telegram',
     endpoints: {
       health: '/health',
       webhooks: {
         junction: '/webhooks/junction',
         twilio: '/webhooks/twilio',
+        telegram: '/webhooks/telegram',
       },
     },
   });
@@ -449,6 +474,7 @@ function startServer(): void {
         health: `/health`,
         junctionWebhook: `/webhooks/junction`,
         twilioWebhook: `/webhooks/twilio`,
+        telegramWebhook: `/webhooks/telegram`,
       });
     });
   } catch (error: any) {

@@ -1,6 +1,7 @@
 import { CronJob } from 'cron';
 import supabaseService from '../services/supabase';
 import twilioService from '../services/twilio';
+import telegramService from '../services/telegram';
 import logger from '../utils/logger';
 
 /**
@@ -28,14 +29,14 @@ export const scheduledRemindersJob = new CronJob(
 
       for (const reminder of reminders) {
         try {
-          // Get user to find phone number
+          // Get user to find platform and identifier
           const { data: user } = await (supabaseService as any).client
             .from('users')
-            .select('phone_number, name')
+            .select('phone_number, telegram_user_id, platform, name')
             .eq('id', reminder.user_id)
             .single();
 
-          if (!user || !user.phone_number) {
+          if (!user) {
             logger.warn('User not found for reminder', {
               reminderId: reminder.id,
               userId: reminder.user_id,
@@ -44,11 +45,25 @@ export const scheduledRemindersJob = new CronJob(
             continue;
           }
 
+          const platform = user.platform || 'whatsapp';
+          const userIdentifier = platform === 'telegram' ? user.telegram_user_id : user.phone_number;
+
+          if (!userIdentifier) {
+            logger.warn('User missing identifier for reminder', {
+              reminderId: reminder.id,
+              userId: reminder.user_id,
+              platform,
+            });
+            failureCount++;
+            continue;
+          }
+
           // Format reminder message
           const message = `Yo ${user.name || 'bro'} 👋\n\nReminder: ${reminder.content}`;
 
-          // Send via WhatsApp
-          await twilioService.sendMessage(user.phone_number, message);
+          // Send via appropriate platform
+          const messagingService = platform === 'telegram' ? telegramService : twilioService;
+          await messagingService.sendMessage(userIdentifier, message);
 
           // Mark as reminded
           await supabaseService.updateMemory(reminder.id, {
@@ -60,6 +75,7 @@ export const scheduledRemindersJob = new CronJob(
           logger.info('Scheduled reminder sent', {
             reminderId: reminder.id,
             userId: reminder.user_id,
+            platform,
             scheduledFor: reminder.scheduled_for,
           });
         } catch (error: any) {

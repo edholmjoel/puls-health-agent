@@ -1,8 +1,10 @@
 import { DateTime } from 'luxon';
 import supabaseService from '../services/supabase';
 import twilioService from '../services/twilio';
+import telegramService from '../services/telegram';
 import anthropicService from '../services/anthropic';
 import { UserHealthData } from '../types/conversation';
+import { DbUser } from '../types/database';
 import logger from '../utils/logger';
 
 export async function runDailyBrief(): Promise<void> {
@@ -43,13 +45,19 @@ export async function runDailyBrief(): Promise<void> {
   }
 }
 
-async function sendDailyBriefToUser(user: any): Promise<void> {
+async function sendDailyBriefToUser(user: DbUser): Promise<void> {
   const userId = user.id;
   const userName = user.name || 'there';
-  const phoneNumber = user.phone_number;
+  const platform = user.platform || 'whatsapp';
+  const userIdentifier = platform === 'telegram' ? user.telegram_user_id : user.phone_number;
+
+  if (!userIdentifier) {
+    logger.error('User missing identifier', { userId, platform });
+    return;
+  }
 
   try {
-    logger.info('Generating daily brief for user', { userId, userName });
+    logger.info('Generating daily brief for user', { userId, userName, platform });
 
     const today = DateTime.now().setZone('Europe/Stockholm').toISODate();
     if (!today) {
@@ -80,7 +88,12 @@ async function sendDailyBriefToUser(user: any): Promise<void> {
 
       const noDataMessage = `Good morning, ${userName}! Your device didn't sync overnight. Make sure it's charged and connected so I can give you personalized insights tomorrow!`;
 
-      await twilioService.sendMessage(phoneNumber, noDataMessage);
+      // Send via appropriate platform
+      if (platform === 'telegram') {
+        await telegramService.sendMessage(userIdentifier as number, noDataMessage);
+      } else {
+        await twilioService.sendMessage(userIdentifier as string, noDataMessage);
+      }
 
       await supabaseService.storeDailyBrief({
         user_id: userId,
@@ -89,7 +102,7 @@ async function sendDailyBriefToUser(user: any): Promise<void> {
         sent_at: new Date().toISOString(),
       });
 
-      logger.info('No-data message sent to user', { userId });
+      logger.info('No-data message sent to user', { userId, platform });
       return;
     }
 
@@ -113,9 +126,13 @@ async function sendDailyBriefToUser(user: any): Promise<void> {
 
     const briefContent = await anthropicService.generateDailyBrief(userName, healthData);
 
-    // Split into multiple messages for rapid-fire effect
-    const messages = anthropicService.splitIntoMessages(briefContent);
-    await twilioService.sendMultipleMessages(phoneNumber, messages);
+    // Split into multiple messages for rapid-fire effect (platform-aware)
+    const messages = anthropicService.splitIntoMessages(briefContent, platform);
+    if (platform === 'telegram') {
+      await telegramService.sendMultipleMessages(userIdentifier as number, messages);
+    } else {
+      await twilioService.sendMultipleMessages(userIdentifier as string, messages);
+    }
 
     await supabaseService.storeDailyBrief({
       user_id: userId,
@@ -127,6 +144,7 @@ async function sendDailyBriefToUser(user: any): Promise<void> {
     logger.info('Daily brief sent successfully', {
       userId,
       userName,
+      platform,
       messageCount: messages.length,
       contentLength: briefContent.length,
     });

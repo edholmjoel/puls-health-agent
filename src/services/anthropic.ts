@@ -325,9 +325,10 @@ Keep it real, keep it short (under 150 words total). Text like you're messaging 
    * Creates 5-10 smaller messages for more natural conversation flow
    * Can be disabled via ENABLE_MESSAGE_SPLITTING=false to save on message quota
    * @param responseText - The full response from Claude
+   * @param platform - Platform to optimize splitting for ('whatsapp' or 'telegram')
    * @returns Array of message strings
    */
-  splitIntoMessages(responseText: string): string[] {
+  splitIntoMessages(responseText: string, platform: 'whatsapp' | 'telegram' = 'whatsapp'): string[] {
     // Check if message splitting is disabled (to save on Twilio quota)
     const enableSplitting = process.env.ENABLE_MESSAGE_SPLITTING !== 'false';
 
@@ -335,6 +336,63 @@ Keep it real, keep it short (under 150 words total). Text like you're messaging 
       logger.debug('Message splitting disabled via env var');
       return [responseText];
     }
+
+    // Platform-aware splitting
+    if (platform === 'telegram') {
+      return this.splitTelegramMessages(responseText);
+    }
+
+    return this.splitWhatsAppMessages(responseText);
+  }
+
+  /**
+   * Split messages for Telegram (4096 char limit, less aggressive splitting)
+   * @param text - Text to split
+   * @returns Array of message strings
+   */
+  private splitTelegramMessages(text: string): string[] {
+    const messages: string[] = [];
+    const MAX_LENGTH = 4096;
+
+    // Split by double newlines to get paragraphs
+    const paragraphs = text.split(/\n\n+/).map(p => p.trim()).filter(p => p.length > 0);
+
+    let currentMessage = '';
+
+    for (const paragraph of paragraphs) {
+      // If adding this paragraph would exceed limit, save current and start new
+      if (currentMessage.length > 0 && (currentMessage.length + paragraph.length + 2) > MAX_LENGTH) {
+        messages.push(currentMessage.trim());
+        currentMessage = paragraph;
+      } else {
+        // Add paragraph to current message
+        if (currentMessage.length > 0) {
+          currentMessage += '\n\n' + paragraph;
+        } else {
+          currentMessage = paragraph;
+        }
+      }
+    }
+
+    // Add remaining message
+    if (currentMessage.length > 0) {
+      messages.push(currentMessage.trim());
+    }
+
+    logger.debug('Split response for Telegram', {
+      originalLength: text.length,
+      messageCount: messages.length
+    });
+
+    return messages.length > 0 ? messages : [text];
+  }
+
+  /**
+   * Split messages for WhatsApp (aggressive splitting for rapid-fire effect)
+   * @param responseText - Text to split
+   * @returns Array of message strings
+   */
+  private splitWhatsAppMessages(responseText: string): string[] {
     const messages: string[] = [];
 
     // First, split by double newlines to get paragraphs
@@ -397,7 +455,7 @@ Keep it real, keep it short (under 150 words total). Text like you're messaging 
       }
     }
 
-    logger.debug('Split response into messages', {
+    logger.debug('Split response for WhatsApp', {
       originalLength: responseText.length,
       messageCount: messages.length
     });
