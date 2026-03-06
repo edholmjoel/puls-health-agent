@@ -319,7 +319,7 @@ async function handleConnectionCreated(
       .from('wearable_data')
       .select('*')
       .eq('user_id', user.id)
-      .or('event_type.ilike.%sleep.created,event_type.ilike.%activity.created,event_type.ilike.%workout.created')
+      .or('event_type.ilike.%sleep.created,event_type.ilike.%activity.created,event_type.ilike.%workout%.created')
       .order('received_at', { ascending: false });
 
     if (dataError) {
