@@ -1,3 +1,5 @@
+import { OnboardingInsights } from './onboarding';
+
 export type ConversationStateType =
   | 'new'
   | 'awaiting_name'
@@ -15,6 +17,9 @@ export interface StateContext {
   linkToken?: string;
   connectionAttempts?: number;
   lastBriefDate?: string;
+  // Onboarding fields
+  onboardingInsights?: OnboardingInsights; // Stored insights for gradual revelation
+  onboardingPhase?: 'question_1' | 'question_2' | 'question_3' | 'complete'; // Track progress
   [key: string]: any;
 }
 

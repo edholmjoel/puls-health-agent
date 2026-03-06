@@ -5,6 +5,8 @@ import supabaseService from '../services/supabase';
 import twilioService from '../services/twilio';
 import telegramService from '../services/telegram';
 import notificationService from '../services/notifications';
+import { dataAnalyzerService } from '../services/data-analyzer';
+import anthropicService from '../services/anthropic';
 import {
   JunctionWebhookEvent,
   ConnectionCreatedEvent,
@@ -282,6 +284,7 @@ async function handleConnectionCreated(
     return;
   }
 
+  // Mark user as active
   await supabaseService.updateUser(user.id, {
     onboarding_complete: true,
   });
@@ -290,27 +293,120 @@ async function handleConnectionCreated(
     state: 'active',
   });
 
-  const confirmationMessage = `Your ${provider} is connected! I'll start analyzing your data and send you daily health briefs every morning at 7am. Feel free to ask me anything about your health and fitness!`;
+  // Helper to send messages via appropriate platform
+  const sendMessage = async (message: string) => {
+    const platform = user.platform || 'whatsapp';
+    if (platform === 'telegram' && user.telegram_user_id) {
+      await telegramService.sendMessage(user.telegram_user_id, message);
+    } else if (platform === 'whatsapp' && user.phone_number) {
+      await twilioService.sendMessage(user.phone_number, message);
+    } else {
+      logger.warn('User missing identifier for sending message', {
+        userId: user.id,
+        platform,
+      });
+    }
+  };
 
-  // Send via appropriate platform
-  const platform = user.platform || 'whatsapp';
-  if (platform === 'telegram' && user.telegram_user_id) {
-    await telegramService.sendMessage(user.telegram_user_id, confirmationMessage);
-  } else if (platform === 'whatsapp' && user.phone_number) {
-    await twilioService.sendMessage(user.phone_number, confirmationMessage);
-  } else {
-    logger.warn('User missing identifier for connection confirmation', {
+  try {
+    logger.info('Fetching wearable data for onboarding', {
       userId: user.id,
-      platform,
     });
-  }
 
-  logger.info('User onboarding completed', {
-    requestId,
-    userId: user.id,
-    platform,
-    provider,
-  });
+    // Fetch summary data (sleep, activity, workouts) - don't filter by date range yet
+    // Junction sends all available historical data, so we want to capture it all
+    const { data: wearableData, error: dataError } = await (supabaseService as any).client
+      .from('wearable_data')
+      .select('*')
+      .eq('user_id', user.id)
+      .or('event_type.ilike.%sleep.created,event_type.ilike.%activity.created,event_type.ilike.%workout.created')
+      .order('received_at', { ascending: false });
+
+    if (dataError) {
+      throw dataError;
+    }
+
+    if (!wearableData || wearableData.length === 0) {
+      // No data yet - send friendly message and exit
+      logger.info('No historical data available yet', { userId: user.id });
+      await sendMessage(
+        `Your ${provider} is connected! Give me a few minutes to sync your data, then I'll have some insights for you 👊`
+      );
+      return;
+    }
+
+    logger.info('Historical data fetched', {
+      userId: user.id,
+      dataPoints: wearableData.length,
+    });
+
+    // Analyze the data
+    const insights = await dataAnalyzerService.generateOnboardingInsights(wearableData);
+
+    if (!insights || insights.achievements.length === 0) {
+      // No meaningful insights - fallback to generic message
+      logger.info('No meaningful insights generated', { userId: user.id });
+      await sendMessage(
+        `Your ${provider} is connected! I'm looking at your data now - give me a moment to get familiar with your training 👀`
+      );
+      return;
+    }
+
+    // Generate opening hook (3-5 rapid-fire messages)
+    const openingMessages = await anthropicService.generateOnboardingOpening(
+      user.name || 'there',
+      insights
+    );
+
+    logger.info('Generated onboarding opening', {
+      userId: user.id,
+      messageCount: openingMessages.length,
+    });
+
+    // Send opening messages with slight delays for rapid-fire feel
+    for (let i = 0; i < openingMessages.length; i++) {
+      await sendMessage(openingMessages[i]);
+      // Small delay between messages (200-500ms) for natural texting feel
+      if (i < openingMessages.length - 1) {
+        await new Promise(resolve => setTimeout(resolve, 300 + Math.random() * 200));
+      }
+    }
+
+    // Update conversation state to track onboarding progress
+    const conversationState = await supabaseService.getConversationState(user.id);
+    const currentContext = (conversationState?.context as any) || {};
+    await supabaseService.updateConversationState(user.id, {
+      context: {
+        ...currentContext,
+        onboardingInsights: insights, // Store for later use
+        onboardingPhase: 'question_1', // Track which question we asked
+      } as any,
+    });
+
+    logger.info('User onboarding initiated', {
+      requestId,
+      userId: user.id,
+      platform: user.platform,
+      provider,
+      achievementsCount: insights.achievements.length,
+    });
+
+    // Bot stops here and waits for user response
+    // Next message from user will be handled by handleActiveConversation()
+
+  } catch (error: any) {
+    // Fallback to generic message if data analysis fails
+    logger.error('Failed to generate personalized welcome', {
+      requestId,
+      userId: user.id,
+      error: error.message,
+      stack: error.stack,
+    });
+
+    await sendMessage(
+      `Your ${provider} is connected! Give me a sec to check out your data...`
+    );
+  }
 }
 
 export default router;

@@ -1,7 +1,8 @@
 import '../config';
 import Anthropic from '@anthropic-ai/sdk';
-import { UserHealthData, ConversationMessage } from '../types/conversation';
+import { UserHealthData, ConversationMessage, StateContext } from '../types/conversation';
 import { DbMemory } from '../types/memory';
+import { OnboardingInsights } from '../types/onboarding';
 import { ExternalServiceError } from '../errors/AppError';
 import logger from '../utils/logger';
 
@@ -62,7 +63,8 @@ class AnthropicService {
     conversationHistory: ConversationMessage[],
     userMessage: string,
     healthData?: UserHealthData,
-    memories?: DbMemory[]
+    memories?: DbMemory[],
+    context?: StateContext
   ): Promise<string> {
     try {
       const systemPrompt = this.buildHealthCoachSystemPrompt(memories);
@@ -72,8 +74,32 @@ class AnthropicService {
         content: msg.content,
       }));
 
+      // Check if we're in onboarding mode
+      const isOnboarding = context?.onboardingPhase &&
+        context.onboardingPhase !== 'complete' &&
+        conversationHistory.length < 8; // First ~4 exchanges
+
       let finalUserMessage = userMessage;
-      if (healthData && Object.keys(healthData).length > 0) {
+
+      // Add onboarding context if applicable
+      if (isOnboarding && context?.onboardingInsights) {
+        const additionalContext = `
+ONBOARDING MODE:
+You just welcomed this user and asked about their training goals.
+You have additional insights about them that you haven't shared yet:
+
+${context.onboardingInsights.achievements.slice(1).map(a => `- ${a}`).join('\n')}
+
+Gradually reveal these insights as the conversation progresses.
+- React to their answer first
+- Then share ONE more insight
+- Ask a follow-up question
+- Build on what they tell you
+
+Don't dump all data at once. Keep it conversational and natural.
+`;
+        finalUserMessage = `${additionalContext}\n\n${userMessage}`;
+      } else if (healthData && Object.keys(healthData).length > 0) {
         finalUserMessage = `${userMessage}\n\nRecent health data:\n${this.formatHealthDataForContext(healthData)}`;
       }
 
@@ -86,6 +112,7 @@ class AnthropicService {
         historyLength: conversationHistory.length,
         hasHealthData: !!healthData,
         memoriesCount: memories?.length || 0,
+        isOnboarding,
       });
 
       const message = await this.client.messages.create({
@@ -110,6 +137,82 @@ class AnthropicService {
         error: error.message,
       });
       throw new ExternalServiceError('Anthropic', `Failed to generate response: ${error.message}`);
+    }
+  }
+
+  /**
+   * Generate onboarding opening - ONLY 2 messages (1 insight + 1 question)
+   * This creates the initial hook after wearable connection
+   */
+  async generateOnboardingOpening(
+    userName: string,
+    insights: OnboardingInsights
+  ): Promise<string[]> {
+    try {
+      const systemPrompt = this.buildHealthCoachSystemPrompt();
+
+      // Pick the single most impressive achievement to lead with
+      const topAchievement = insights.achievements[0] || 'Looking at your recent data';
+
+      const userPrompt = `You're welcoming ${userName} who just connected their wearable device.
+
+Their most impressive achievement from the last 60 days:
+${topAchievement}
+
+Overall profile:
+- Fitness level: ${insights.fitnessLevel}
+- Style: ${insights.workoutStyle}
+- Sleep pattern: ${insights.sleepPattern}
+
+Generate 3-5 short messages to start the conversation (rapid-fire texting style):
+
+Message 1: Hook them with ONE specific data point that will WOW them (be excited, show you analyzed their data)
+Message 2: Quick follow-up or reaction to that data point
+Message 3: Ask ONE open-ended question about their goals or training
+Message 4-5 (optional): If natural, add brief observations
+
+CRITICAL:
+- Do NOT share all insights at once
+- Keep each message SHORT (10-25 words max)
+- Text like rapid-fire messaging (short bursts)
+- Save other insights for follow-up after they respond
+- Be conversational and natural
+
+Be genuinely impressed. Be casual. Text like you're excited to talk.`;
+
+      logger.debug('Generating onboarding opening', { userName, topAchievement });
+
+      const message = await this.client.messages.create({
+        model: this.model,
+        max_tokens: 300,
+        temperature: 0.9,
+        system: systemPrompt,
+        messages: [{ role: 'user', content: userPrompt }],
+      });
+
+      const content = message.content[0];
+      if (content.type !== 'text') {
+        throw new Error('Unexpected response type from Claude');
+      }
+
+      const response = content.text;
+
+      // Split into individual messages (3-5 for rapid-fire feel)
+      const lines = response.split('\n').filter(line => line.trim().length > 0);
+      const messages = lines.slice(0, 5); // Allow up to 5 messages
+
+      logger.info('Onboarding opening generated', {
+        userName,
+        messageCount: messages.length,
+      });
+
+      return messages;
+    } catch (error: any) {
+      logger.error('Failed to generate onboarding opening', {
+        userName,
+        error: error.message,
+      });
+      throw new ExternalServiceError('Anthropic', `Failed to generate onboarding opening: ${error.message}`);
     }
   }
 

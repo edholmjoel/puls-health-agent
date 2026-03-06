@@ -274,7 +274,7 @@ export async function handleActiveConversation(
     rawResponse = await anthropicService.generateDailyBrief(user.name || 'there', healthData);
     logger.info('Generated on-demand brief', { requestId, userId: user.id });
   } else {
-    rawResponse = await anthropicService.generateResponse(conversationHistory, message, healthData, memories);
+    rawResponse = await anthropicService.generateResponse(conversationHistory, message, healthData, memories, context);
     logger.info('Generated conversational response', { requestId, userId: user.id });
   }
 
@@ -368,11 +368,25 @@ export async function handleActiveConversation(
     },
   ];
 
+  // Progress onboarding phase if in onboarding mode
+  let newOnboardingPhase = context.onboardingPhase;
+  if (context.onboardingPhase && context.onboardingPhase !== 'complete') {
+    if (context.onboardingPhase === 'question_1') {
+      newOnboardingPhase = 'question_2';
+    } else if (context.onboardingPhase === 'question_2') {
+      newOnboardingPhase = 'question_3';
+    } else if (context.onboardingPhase === 'question_3') {
+      newOnboardingPhase = 'complete';
+      logger.info('Onboarding completed', { requestId, userId: user.id });
+    }
+  }
+
   await supabaseService.updateConversationState(user.id, {
     context: {
       ...context,
       conversationHistory: updatedHistory,
       lastBriefDate: lowerMessage.includes('brief') ? DateTime.now().toISODate() : context.lastBriefDate,
+      onboardingPhase: newOnboardingPhase,
     } as any,
   });
 
