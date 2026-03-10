@@ -316,21 +316,11 @@ class SupabaseService {
         ? (endDate.includes('T') ? endDate : `${endDate}T23:59:59Z`)
         : undefined;
 
-      // Only fetch daily/historical summary events — exclude timeseries noise (heartrate, steps, etc.)
-      const USEFUL_EVENT_TYPES = [
-        'daily.data.sleep.created',
-        'daily.data.activity.created',
-        'daily.data.workouts.created',
-        'historical.data.sleep.created',
-        'historical.data.activity.created',
-        'historical.data.workouts.created',
-      ];
-
       let query = this.client
         .from('wearable_data')
         .select('*')
         .eq('user_id', userId)
-        .in('event_type', USEFUL_EVENT_TYPES)
+        .or('event_type.ilike.%sleep.created,event_type.ilike.%activity.created,event_type.ilike.%workout%.created')
         .gte('received_at', startTimestamp)
         .order('received_at', { ascending: false })
         .limit(100);
