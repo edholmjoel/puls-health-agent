@@ -106,21 +106,25 @@ async function sendDailyBriefToUser(user: DbUser): Promise<void> {
       return;
     }
 
+    const sortByDate = (a: any, b: any) =>
+      new Date(b.calendar_date || b.date || b.timestamp || 0).getTime() -
+      new Date(a.calendar_date || a.date || a.timestamp || 0).getTime();
+
     const healthData: UserHealthData = {
       sleep: wearableData
         .filter((d) => d.event_type && d.event_type.includes('sleep'))
         .map((d) => d.payload as any)
-        .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+        .sort(sortByDate)
         .slice(0, 3),
       activity: wearableData
         .filter((d) => d.event_type && d.event_type.includes('activity'))
         .map((d) => d.payload as any)
-        .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+        .sort(sortByDate)
         .slice(0, 3),
       workouts: wearableData
         .filter((d) => d.event_type && d.event_type.includes('workout'))
         .map((d) => d.payload as any)
-        .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+        .sort(sortByDate)
         .slice(0, 5),
     };
 

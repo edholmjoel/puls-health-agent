@@ -64,10 +64,11 @@ class AnthropicService {
     userMessage: string,
     healthData?: UserHealthData,
     memories?: DbMemory[],
-    context?: StateContext
+    context?: StateContext,
+    healthProfile?: any
   ): Promise<string> {
     try {
-      const systemPrompt = this.buildHealthCoachSystemPrompt(memories);
+      const systemPrompt = this.buildHealthCoachSystemPrompt(memories, healthProfile);
 
       const messages: Anthropic.MessageParam[] = conversationHistory.map((msg) => ({
         role: msg.role,
@@ -99,8 +100,11 @@ Gradually reveal these insights as the conversation progresses.
 Don't dump all data at once. Keep it conversational and natural.
 `;
         finalUserMessage = `${additionalContext}\n\n${userMessage}`;
-      } else if (healthData && Object.keys(healthData).length > 0) {
-        finalUserMessage = `${userMessage}\n\nRecent health data:\n${this.formatHealthDataForContext(healthData)}`;
+      } else if (healthData) {
+        const healthContext = this.formatHealthDataForContext(healthData);
+        if (healthContext) {
+          finalUserMessage = `${userMessage}\n\nRecent health data:\n${healthContext}`;
+        }
       }
 
       messages.push({
@@ -218,7 +222,7 @@ Be genuinely impressed. Be casual. Text like you're excited to talk.`;
     }
   }
 
-  private buildHealthCoachSystemPrompt(memories?: DbMemory[]): string {
+  private buildHealthCoachSystemPrompt(memories?: DbMemory[], healthProfile?: any): string {
     let prompt = `You're Puls - a 26-year-old personal trainer who's really good at reading health data and calling people out when they need it.
 
 WHO YOU ARE:
@@ -282,6 +286,31 @@ Examples:
 When they ask "what do you remember?" or "forget about X", respond naturally but include:
 - LIST_MEMORIES or FORGET_MEMORY: {"search": "X"}`;
 
+    // Include health profile if available
+    if (healthProfile?.profile) {
+      const p = healthProfile.profile;
+      prompt += '\n\nUSER HEALTH PROFILE (built from their full history):';
+      if (p.fitness_level) prompt += `\n- Fitness level: ${p.fitness_level}`;
+      if (p.primary_sport) prompt += `\n- Primary sport: ${p.primary_sport}`;
+      if (p.baselines) {
+        const b = p.baselines;
+        if (b.avg_weekly_workouts) prompt += `\n- Avg workouts/week: ${b.avg_weekly_workouts}`;
+        if (b.avg_sleep_hours) prompt += `\n- Avg sleep: ${b.avg_sleep_hours}h`;
+        if (b.resting_hr) prompt += `\n- Resting HR: ${b.resting_hr} bpm`;
+        if (b.hrv_avg) prompt += `\n- Avg HRV: ${b.hrv_avg}ms`;
+        if (b.avg_weekly_km) prompt += `\n- Avg weekly km: ${b.avg_weekly_km}`;
+      }
+      if (p.achievements) {
+        const a = p.achievements;
+        if (a.longest_run_km) prompt += `\n- Longest run: ${a.longest_run_km}km`;
+        if (a.fastest_5k_mins) prompt += `\n- Fastest 5K: ${a.fastest_5k_mins} mins`;
+        if (a.biggest_ride_km) prompt += `\n- Biggest ride: ${a.biggest_ride_km}km`;
+      }
+      if (p.patterns?.consistency) prompt += `\n- Consistency: ${p.patterns.consistency}`;
+      if (p.summary) prompt += `\n- Summary: ${p.summary}`;
+      prompt += '\n\nUse this profile to personalize responses — reference their history naturally when relevant.';
+    }
+
     // Include existing memories in context
     if (memories && memories.length > 0) {
       prompt += '\n\nWHAT YOU REMEMBER ABOUT THIS USER:\n';
@@ -327,7 +356,8 @@ When they ask "what do you remember?" or "forget about X", respond naturally but
 
     if (healthData.workouts && healthData.workouts.length > 0) {
       const latestWorkout = healthData.workouts[0];
-      const sport = typeof latestWorkout.sport === 'string' ? latestWorkout.sport : (latestWorkout.sport?.name || 'workout');
+      const rawSport: any = latestWorkout.sport;
+      const sport = typeof rawSport === 'string' ? rawSport : (rawSport?.name || rawSport?.slug || 'workout');
       const duration = latestWorkout.duration || (latestWorkout as any).moving_time || 0;
       prompt += `Last workout:\n`;
       prompt += `- ${latestWorkout.title} (${sport})\n`;
@@ -377,7 +407,8 @@ Keep it real, keep it short (under 150 words total). Text like you're messaging 
 
     if (healthData.workouts && healthData.workouts.length > 0) {
       const workout = healthData.workouts[0];
-      const sport = typeof workout.sport === 'string' ? workout.sport : (workout.sport?.name || 'workout');
+      const rawWorkoutSport: any = workout.sport;
+      const sport = typeof rawWorkoutSport === 'string' ? rawWorkoutSport : (rawWorkoutSport?.name || rawWorkoutSport?.slug || 'workout');
       const duration = workout.duration || (workout as any).moving_time || 0;
       context += `Recent workout: ${workout.title} (${sport}), ${Math.round(duration / 60)} min\n`;
     }

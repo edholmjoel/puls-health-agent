@@ -224,19 +224,23 @@ export async function handleActiveConversation(
     });
   }
 
+  const sortByDate = (a: any, b: any) =>
+    new Date(b.calendar_date || b.date || b.timestamp || 0).getTime() -
+    new Date(a.calendar_date || a.date || a.timestamp || 0).getTime();
+
   const healthData: UserHealthData = {
     sleep: wearableData
       .filter((d) => d.event_type && d.event_type.includes('sleep'))
       .map((d) => d.payload as any)
-      .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()),
+      .sort(sortByDate),
     activity: wearableData
       .filter((d) => d.event_type && d.event_type.includes('activity'))
       .map((d) => d.payload as any)
-      .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()),
+      .sort(sortByDate),
     workouts: wearableData
       .filter((d) => d.event_type && d.event_type.includes('workout'))
       .map((d) => d.payload as any)
-      .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()),
+      .sort(sortByDate),
   };
 
   logger.info('Prepared health data for AI', {
@@ -263,6 +267,18 @@ export async function handleActiveConversation(
     });
   }
 
+  // Fetch health profile (non-fatal if missing)
+  let healthProfile: any = null;
+  try {
+    healthProfile = await supabaseService.getHealthProfile(user.id);
+  } catch (error: any) {
+    logger.warn('Could not fetch health profile, proceeding without it', {
+      requestId,
+      userId: user.id,
+      error: error.message,
+    });
+  }
+
   let rawResponse: string;
 
   if (
@@ -274,7 +290,7 @@ export async function handleActiveConversation(
     rawResponse = await anthropicService.generateDailyBrief(user.name || 'there', healthData);
     logger.info('Generated on-demand brief', { requestId, userId: user.id });
   } else {
-    rawResponse = await anthropicService.generateResponse(conversationHistory, message, healthData, memories, context);
+    rawResponse = await anthropicService.generateResponse(conversationHistory, message, healthData, memories, context, healthProfile);
     logger.info('Generated conversational response', { requestId, userId: user.id });
   }
 

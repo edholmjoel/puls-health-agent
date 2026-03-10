@@ -7,6 +7,7 @@ import telegramService from '../services/telegram';
 import notificationService from '../services/notifications';
 import { dataAnalyzerService } from '../services/data-analyzer';
 import anthropicService from '../services/anthropic';
+import { generateHealthProfile } from '../jobs/generate-health-profile';
 import {
   JunctionWebhookEvent,
   ConnectionCreatedEvent,
@@ -291,6 +292,29 @@ async function handleConnectionCreated(
 
   await supabaseService.updateConversationState(user.id, {
     state: 'active',
+  });
+
+  // Trigger full historical data pull from Junction so we get all-time data via webhooks
+  try {
+    await junctionService.triggerHistoricalPull([user_id], provider);
+    logger.info('Historical data pull triggered', { requestId, userId: user.id, provider });
+  } catch (pullError: any) {
+    logger.warn('Failed to trigger historical pull (non-fatal)', {
+      requestId,
+      userId: user.id,
+      error: pullError.message,
+    });
+  }
+
+  // Schedule health profile generation after 30 minutes to allow historical data to arrive
+  const PROFILE_DELAY_MS = 30 * 60 * 1000;
+  setTimeout(async () => {
+    await generateHealthProfile(user.id);
+  }, PROFILE_DELAY_MS);
+  logger.info('Health profile generation scheduled', {
+    requestId,
+    userId: user.id,
+    delayMinutes: 30,
   });
 
   // Helper to send messages via appropriate platform

@@ -1,6 +1,7 @@
 import twilioService from './twilio';
 import telegramService from './telegram';
 import supabaseService from './supabase';
+import anthropicService from './anthropic';
 import { DbUser } from '../types/database';
 import logger from '../utils/logger';
 
@@ -150,62 +151,48 @@ class NotificationService {
     workoutData: any
   ): Promise<ProactiveNotification> {
     try {
-      const { sport, duration, distance, title } = workoutData;
+      // Normalize sport field — Junction/Strava may send an object like {id, name, slug}
+      const rawSport = workoutData.sport;
+      const sport = typeof rawSport === 'string'
+        ? rawSport.toLowerCase()
+        : (rawSport?.name?.toLowerCase() || rawSport?.slug?.toLowerCase() || 'unknown');
 
-      // Generate congratulatory message based on workout type
-      let message = '';
+      // Strava sends moving_time instead of duration
+      const duration = workoutData.duration || workoutData.moving_time;
+      const distance = workoutData.distance;
+      const title = workoutData.title;
 
-      if (sport === 'running' || sport === 'run') {
-        const distanceKm = distance ? (distance / 1000).toFixed(1) : null;
-        const durationMins = duration ? Math.floor(duration / 60) : null;
+      const distanceKm = distance ? (distance / 1000).toFixed(1) : null;
+      const durationMins = duration ? Math.floor(duration / 60) : null;
 
-        if (distanceKm && durationMins) {
-          const paceMinPerKm = durationMins / parseFloat(distanceKm);
-          message = `Yo! Just saw that ${distanceKm}km run 🏃‍♂️ ${durationMins} mins - ${paceMinPerKm.toFixed(1)} min/km pace. Solid work bro!`;
-        } else if (durationMins) {
-          message = `Nice ${durationMins} min run! 🏃‍♂️ Keep it up bro!`;
-        }
-      } else if (sport === 'cycling' || sport === 'bike') {
-        const distanceKm = distance ? (distance / 1000).toFixed(1) : null;
-        const durationMins = duration ? Math.floor(duration / 60) : null;
-
-        if (distanceKm && durationMins) {
-          message = `Sick ${distanceKm}km ride! 🚴 ${durationMins} mins in the saddle. Beast mode!`;
-        } else if (durationMins) {
-          message = `${durationMins} min bike session 🚴 Love it!`;
-        }
-      } else if (sport === 'strength_training' || sport === 'gym' || sport === 'weights') {
-        const durationMins = duration ? Math.floor(duration / 60) : null;
-        if (durationMins) {
-          message = `${durationMins} min gym session 💪 Getting those gains!`;
-        }
-      } else if (sport === 'swimming' || sport === 'swim') {
-        const durationMins = duration ? Math.floor(duration / 60) : null;
-        const distanceM = distance || null;
-
-        if (distanceM && durationMins) {
-          message = `${distanceM}m swim in ${durationMins} mins 🏊‍♂️ Crushing it!`;
-        } else if (durationMins) {
-          message = `${durationMins} min swim session 🏊‍♂️ Nice!`;
-        }
-      } else {
-        // Generic workout message
-        const durationMins = duration ? Math.floor(duration / 60) : null;
-        const workoutName = title || sport || 'workout';
-        if (durationMins) {
-          message = `Saw your ${workoutName} - ${durationMins} mins! 💪 Keep crushing it!`;
-        }
+      // Need at least duration or distance to send a meaningful notification
+      if (!durationMins && !distanceKm) {
+        return { shouldNotify: false };
       }
 
-      if (message) {
-        return {
-          shouldNotify: true,
-          message,
-          type: 'workout',
-        };
-      }
+      const pace =
+        distanceKm && durationMins
+          ? (durationMins / parseFloat(distanceKm)).toFixed(1)
+          : null;
 
-      return { shouldNotify: false };
+      // Build workout description for Claude
+      const parts = [
+        `Sport: ${sport}`,
+        title ? `Title: ${title}` : null,
+        distanceKm ? `Distance: ${distanceKm}km` : null,
+        durationMins ? `Duration: ${durationMins} minutes` : null,
+        pace ? `Pace: ${pace} min/km` : null,
+      ].filter(Boolean);
+
+      const workoutPrompt = `User just finished a workout: ${parts.join(', ')}. React to this in 1-2 short messages max. Be specific about their performance. Casual and encouraging.`;
+
+      const message = await anthropicService.generateResponse([], workoutPrompt);
+
+      return {
+        shouldNotify: true,
+        message,
+        type: 'workout',
+      };
     } catch (error: any) {
       logger.error('Error analyzing workout', {
         userId: user.id,

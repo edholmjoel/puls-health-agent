@@ -28,6 +28,10 @@ class TwilioService {
   }
 
   async sendMessage(to: string, body: string): Promise<TwilioMessageResponse> {
+    if (process.env.DISABLE_TWILIO === 'true') {
+      logger.info('Twilio disabled via DISABLE_TWILIO env var, skipping', { to });
+      return {} as TwilioMessageResponse;
+    }
     try {
       const formattedTo = to.startsWith('whatsapp:') ? to : `whatsapp:${to}`;
 
@@ -64,6 +68,10 @@ class TwilioService {
    * @param delayMs - Milliseconds to wait between messages (default 150ms)
    */
   async sendMultipleMessages(to: string, messages: string[], delayMs: number = 150): Promise<void> {
+    if (process.env.DISABLE_TWILIO === 'true') {
+      logger.info('Twilio disabled via DISABLE_TWILIO env var, skipping', { to, messageCount: messages.length });
+      return;
+    }
     try {
       const formattedTo = to.startsWith('whatsapp:') ? to : `whatsapp:${to}`;
 

@@ -316,12 +316,24 @@ class SupabaseService {
         ? (endDate.includes('T') ? endDate : `${endDate}T23:59:59Z`)
         : undefined;
 
+      // Only fetch daily/historical summary events — exclude timeseries noise (heartrate, steps, etc.)
+      const USEFUL_EVENT_TYPES = [
+        'daily.data.sleep.created',
+        'daily.data.activity.created',
+        'daily.data.workouts.created',
+        'historical.data.sleep.created',
+        'historical.data.activity.created',
+        'historical.data.workouts.created',
+      ];
+
       let query = this.client
         .from('wearable_data')
         .select('*')
         .eq('user_id', userId)
+        .in('event_type', USEFUL_EVENT_TYPES)
         .gte('received_at', startTimestamp)
-        .order('received_at', { ascending: false });
+        .order('received_at', { ascending: false })
+        .limit(100);
 
       if (endTimestamp) {
         query = query.lte('received_at', endTimestamp);
@@ -500,6 +512,55 @@ class SupabaseService {
       if (error instanceof ExternalServiceError) throw error;
       logger.error('Error deleting memory', { memoryId, error });
       throw new ExternalServiceError('Supabase', 'Failed to delete memory');
+    }
+  }
+
+  // Health profile operations
+  async getHealthProfile(userId: string): Promise<any | null> {
+    try {
+      const { data, error } = await (this.client.from('health_profiles') as any)
+        .select('*')
+        .eq('user_id', userId)
+        .single();
+
+      if (error && error.code !== 'PGRST116') {
+        logger.warn('Error fetching health profile', { userId, error: error.message });
+        return null;
+      }
+
+      return data || null;
+    } catch (error) {
+      logger.warn('Could not fetch health profile', { userId, error });
+      return null;
+    }
+  }
+
+  async storeHealthProfile(userId: string, profile: any, meta: {
+    totalWorkoutsAnalyzed: number;
+    dataRangeStart?: string;
+    dataRangeEnd?: string;
+  }): Promise<void> {
+    try {
+      const { error } = await (this.client.from('health_profiles') as any)
+        .upsert({
+          user_id: userId,
+          profile,
+          total_workouts_analyzed: meta.totalWorkoutsAnalyzed,
+          data_range_start: meta.dataRangeStart || null,
+          data_range_end: meta.dataRangeEnd || null,
+          generated_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        }, { onConflict: 'user_id' });
+
+      if (error) {
+        throw new ExternalServiceError('Supabase', error.message);
+      }
+
+      logger.info('Health profile stored', { userId });
+    } catch (error) {
+      if (error instanceof ExternalServiceError) throw error;
+      logger.error('Error storing health profile', { userId, error });
+      throw new ExternalServiceError('Supabase', 'Failed to store health profile');
     }
   }
 

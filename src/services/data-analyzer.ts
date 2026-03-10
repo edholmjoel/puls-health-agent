@@ -121,7 +121,9 @@ class DataAnalyzerService {
         healthData.workouts?.push({
           date: payload.calendar_date || payload.date || item.received_at.split('T')[0],
           title: payload.title || 'Workout',
-          sport: payload.sport?.name || payload.sport || 'unknown',
+          sport: typeof payload.sport === 'string'
+            ? payload.sport
+            : (payload.sport?.name || payload.sport?.slug || 'unknown'),
           duration: payload.duration || payload.moving_time || 0,
           distance: payload.distance || 0,
           calories: payload.calories || 0,
